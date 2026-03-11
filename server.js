@@ -625,33 +625,41 @@ async function refreshBenchmarks() {
 // ---- Risk Metrics ----
 function calcRiskMetrics(snapshots) {
   if (!snapshots || snapshots.length < 5) return null;
-  const byDay = {};
-  snapshots.forEach((s) => { byDay[s.t.slice(0, 10)] = s; });
-  const days = Object.values(byDay).sort((a, b) => a.t.localeCompare(b.t));
-  if (days.length < 2) return null;
+
+  // Use snapshots directly (minute-level), sample every 5 points for smoothing
+  const pts = snapshots.length > 100
+    ? snapshots.filter((_, i) => i % 5 === 0 || i === snapshots.length - 1)
+    : snapshots;
+  if (pts.length < 3) return null;
 
   const returns = [];
-  for (let i = 1; i < days.length; i++) {
-    if (days[i - 1].v > 0) returns.push((days[i].v - days[i - 1].v) / days[i - 1].v);
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i - 1].v > 0) returns.push((pts[i].v - pts[i - 1].v) / pts[i - 1].v);
   }
-  if (returns.length < 1) return null;
+  if (returns.length < 2) return null;
 
   // Max Drawdown
-  let peak = days[0].v, maxDD = 0;
-  days.forEach((s) => { if (s.v > peak) peak = s.v; const dd = peak > 0 ? (peak - s.v) / peak : 0; if (dd > maxDD) maxDD = dd; });
+  let peak = pts[0].v, maxDD = 0;
+  pts.forEach((s) => { if (s.v > peak) peak = s.v; const dd = peak > 0 ? (peak - s.v) / peak : 0; if (dd > maxDD) maxDD = dd; });
 
-  // Volatility
+  // Volatility - scale to annualized based on data frequency
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
-  const variance = returns.length > 1 ? returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (returns.length - 1) : 0;
-  const annualVol = Math.sqrt(variance) * Math.sqrt(252);
+  const variance = returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (returns.length - 1);
+  // Estimate periods per year: if data spans < 1 day, use intraday scaling
+  const spanMs = new Date(pts[pts.length - 1].t) - new Date(pts[0].t);
+  const spanDays = Math.max(spanMs / 86400000, 0.01);
+  const periodsPerYear = (returns.length / spanDays) * 252;
+  const annualVol = Math.sqrt(variance) * Math.sqrt(periodsPerYear);
 
   // Returns
-  const totalReturn = days[0].v > 0 ? (days[days.length - 1].v - days[0].v) / days[0].v : 0;
-  const annualReturn = days.length > 1 ? (Math.pow(1 + totalReturn, 252 / days.length) - 1) : 0;
+  const totalReturn = pts[0].v > 0 ? (pts[pts.length - 1].v - pts[0].v) / pts[0].v : 0;
+  const annualReturn = spanDays > 0.01 ? (Math.pow(1 + Math.abs(totalReturn), 252 / spanDays) - 1) * (totalReturn >= 0 ? 1 : -1) : 0;
   const sharpe = annualVol > 0 ? (annualReturn - 0.03) / annualVol : 0;
 
-  // Beta vs benchmarks
+  // Beta vs benchmarks (use daily aggregation for alignment)
   const betas = {};
+  const byDay = {};
+  snapshots.forEach((s) => { byDay[s.t.slice(0, 10)] = s; });
   for (const [bmName, bmKlines] of Object.entries(benchmarkCache)) {
     if (bmKlines.length < 2) continue;
     const bmByDate = {}; bmKlines.forEach((k) => { bmByDate[k.date] = k.c; });
@@ -679,7 +687,7 @@ function calcRiskMetrics(snapshots) {
     annualReturn: +(annualReturn * 100).toFixed(2),
     totalReturn: +(totalReturn * 100).toFixed(2),
     betas,
-    dataPoints: days.length,
+    dataPoints: pts.length,
   };
 }
 
