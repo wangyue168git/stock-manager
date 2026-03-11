@@ -219,11 +219,11 @@ function fetchStockPrices(holdings) {
               let price, open, high, low, prevClose, name;
 
               if (isUS) {
-                // US stock: name,price,change,changePercent,timestamp,...
+                // Sina US: [0]name,[1]price,[2]changePct,[3]timestamp,[4]change,[5]open,[6]high,[7]low,...
                 name = parts[0] || h.symbol;
                 price = parseFloat(parts[1]) || 0;
-                const change = parseFloat(parts[2]) || 0;
-                const changePct = parseFloat(parts[3]) || 0;
+                const changePct = parseFloat(parts[2]) || 0;
+                const change = parseFloat(parts[4]) || 0;
                 prevClose = price - change;
                 high = parseFloat(parts[6]) || price;
                 low = parseFloat(parts[7]) || price;
