@@ -103,39 +103,69 @@ function recordSnapshot(totalCNY, totalCost) {
   saveHistoryFile(history);
 }
 
-// Fetch crypto prices from Binance API
+// Fetch crypto prices - try Coinbase first, then Binance as fallback
 function fetchCryptoPrices(symbols) {
   if (!symbols.length) return Promise.resolve({});
   return new Promise((resolve) => {
     const results = {};
     let done = 0;
     symbols.forEach((sym) => {
-      const pair = `${sym}USDT`;
-      const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${pair}`;
-      https.get(url, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-      }, (res) => {
+      const cbUrl = `https://api.coinbase.com/v2/prices/${sym}-USD/spot`;
+      https.get(cbUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
           try {
             const j = JSON.parse(data);
-            results[`crypto.${sym}`] = {
-              price: parseFloat(j.lastPrice) || 0,
-              changePercent: parseFloat(j.priceChangePercent) || 0,
-              change: parseFloat(j.priceChange) || 0,
-              high: parseFloat(j.highPrice) || 0,
-              low: parseFloat(j.lowPrice) || 0,
-              open: parseFloat(j.openPrice) || 0,
-              prevClose: parseFloat(j.prevClosePrice) || 0,
-              name: sym,
-            };
-          } catch (e) {}
+            if (j.data && j.data.amount) {
+              const price = parseFloat(j.data.amount);
+              results[`crypto.${sym}`] = {
+                price, changePercent: 0, change: 0,
+                high: price, low: price, open: price, prevClose: price,
+                name: sym,
+              };
+              if (++done === symbols.length) resolve(results);
+              return;
+            }
+            throw new Error("no data");
+          } catch (e) {
+            // Fallback to Binance
+            fetchCryptoBinance(sym, results, () => {
+              if (++done === symbols.length) resolve(results);
+            });
+          }
+        });
+      }).on("error", () => {
+        fetchCryptoBinance(sym, results, () => {
           if (++done === symbols.length) resolve(results);
         });
-      }).on("error", () => { if (++done === symbols.length) resolve(results); });
+      });
     });
   });
+}
+
+function fetchCryptoBinance(sym, results, cb) {
+  const url = `https://api.binance.com/api/v3/ticker/24hr?symbol=${sym}USDT`;
+  https.get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+    let data = "";
+    res.on("data", (c) => (data += c));
+    res.on("end", () => {
+      try {
+        const j = JSON.parse(data);
+        results[`crypto.${sym}`] = {
+          price: parseFloat(j.lastPrice) || 0,
+          changePercent: parseFloat(j.priceChangePercent) || 0,
+          change: parseFloat(j.priceChange) || 0,
+          high: parseFloat(j.highPrice) || 0,
+          low: parseFloat(j.lowPrice) || 0,
+          open: parseFloat(j.openPrice) || 0,
+          prevClose: parseFloat(j.prevClosePrice) || 0,
+          name: sym,
+        };
+      } catch (e) {}
+      cb();
+    });
+  }).on("error", () => cb());
 }
 
 // Convert holding to Sina API symbol format
