@@ -448,6 +448,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: update holding (edit shares/costPrice)
+  if (urlObj.pathname === "/api/holding" && req.method === "PUT") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      try {
+        const { accountIndex, holdingIndex, shares, costPrice } = JSON.parse(body);
+        const p = loadPortfolio();
+        if (p.accounts[accountIndex] && p.accounts[accountIndex].holdings[holdingIndex]) {
+          const h = p.accounts[accountIndex].holdings[holdingIndex];
+          if (shares !== undefined) h.shares = parseFloat(shares);
+          if (costPrice !== undefined) h.costPrice = parseFloat(costPrice);
+          savePortfolio(p);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.writeHead(400);
+          res.end("Not found");
+        }
+      } catch (e) {
+        res.writeHead(400);
+        res.end(e.message);
+      }
+    });
+    return;
+  }
+
   // API: delete holding
   if (urlObj.pathname === "/api/holding" && req.method === "DELETE") {
     const ai = parseInt(urlObj.searchParams.get("account"));
