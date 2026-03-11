@@ -735,21 +735,21 @@ let newsLastFetch = 0;
 
 function fetchNewsItem(keyword) {
   return new Promise((resolve) => {
-    const url = `https://searchapi.eastmoney.com/api/Info/search?appid=el1902262&keyword=${encodeURIComponent(keyword)}&pageindex=1&pagesize=5&type=1001`;
-    https.get(url, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://www.eastmoney.com" }, timeout: 5000 }, (res) => {
+    const q = encodeURIComponent(keyword);
+    const url = `https://www.bing.com/news/search?q=${q}&format=rss&count=5`;
+    https.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }, (res) => {
       let data = "";
       res.on("data", (c) => (data += c));
       res.on("end", () => {
         try {
-          const j = JSON.parse(data);
-          if (j.Data && j.Data.InfoList) {
-            resolve(j.Data.InfoList.slice(0, 5).map((item) => ({
-              title: (item.Title || "").replace(/<[^>]+>/g, ""),
-              time: item.ShowTime || "",
-              source: item.MediaName || "",
-              url: item.Url || "",
-            })));
-          } else resolve([]);
+          const items = data.match(/<item>([\s\S]*?)<\/item>/g) || [];
+          resolve(items.slice(0, 5).map((item) => {
+            const title = ((item.match(/<title>(.*?)<\/title>/) || [])[1] || "").replace(/<!\[CDATA\[|\]\]>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+            const link = (item.match(/<link>(.*?)<\/link>/) || [])[1] || "";
+            const pubDate = (item.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || "";
+            const source = (item.match(/<News:Source>(.*?)<\/News:Source>/) || [])[1] || "";
+            return { title, time: pubDate ? new Date(pubDate).toISOString() : "", source, url: link };
+          }));
         } catch (e) { resolve([]); }
       });
     }).on("error", () => resolve([]));
@@ -763,7 +763,21 @@ async function refreshNews() {
   const holdings = [];
   portfolio.accounts.forEach((acc) => acc.holdings.forEach((h) => { if (!holdings.find((x) => x.symbol === h.symbol)) holdings.push(h); }));
   for (const h of holdings) {
-    try { newsCache[h.symbol] = await fetchNewsItem(h.name.replace(/\s*ETF.*$/i, "").trim()); } catch (e) {}
+    try {
+      const isUS = h.market === "nasdaq" || h.market === "nyse";
+      const isCrypto = h.market === "crypto";
+      // Build search keyword for Bing News
+      let kw;
+      if (isUS) kw = `${h.symbol} stock`;
+      else if (isCrypto) kw = `${h.symbol} crypto`;
+      else {
+        kw = h.name.trim();
+        // For ETFs with short names, keep full name
+        if (kw.length <= 3) kw = h.symbol + " " + kw;
+        kw += " 股票";
+      }
+      newsCache[h.symbol] = await fetchNewsItem(kw);
+    } catch (e) {}
   }
 }
 
