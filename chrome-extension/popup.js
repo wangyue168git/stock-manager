@@ -1,6 +1,9 @@
 let maskMode = false;
 let currentTab = "holdings";
 
+// Default portfolio data (auto-imported from portfolio.json)
+const DEFAULT_PORTFOLIO = {"accounts":[{"name":"A股账户","currency":"CNY","holdings":[{"symbol":"000858","market":"sz","name":"五粮液","shares":100,"costPrice":104.58},{"symbol":"513100","market":"sh","name":"纳指ETF","shares":19400,"costPrice":1.795},{"symbol":"513650","market":"sh","name":"标普500ETF南方","shares":17800,"costPrice":1.748},{"symbol":"512010","market":"sh","name":"医药ETF","shares":12600,"costPrice":0.374}]},{"name":"美股-IB","currency":"USD","holdings":[{"symbol":"TSLA","market":"nasdaq","name":"特斯拉","shares":24,"costPrice":407},{"symbol":"GOOGL","market":"nasdaq","name":"谷歌","shares":5,"costPrice":297},{"symbol":"AXP","market":"nyse","name":"美国运通","shares":4,"costPrice":294},{"symbol":"SOFI","market":"nasdaq","name":"SoFi","shares":55,"costPrice":18.3},{"symbol":"QQQ","market":"nasdaq","name":"QQQ","shares":2,"costPrice":605},{"symbol":"SCHG","market":"nyse","name":"SCHG","shares":42,"costPrice":30.8}]},{"name":"币圈","currency":"USD","holdings":[{"symbol":"ETH","market":"crypto","name":"以太坊 ETH","shares":0.85,"costPrice":2300}]}]};
+
 // ---- Bindall events via addEventListener (CSP compliance) ----
 document.addEventListener("DOMContentLoaded", async () => {
   // Bind button events
@@ -19,19 +22,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   maskMode = !!stored;
   applyMask();
 
-  // Load cached data or prompt setup
+  // Auto-init: if no portfolio saved, use default
+  const { portfolio } = await chrome.storage.sync.get("portfolio");
+  if (!portfolio || !portfolio.accounts?.length) {
+    await chrome.storage.sync.set({ portfolio: DEFAULT_PORTFOLIO });
+  }
+
+  // Load cached data or trigger fresh fetch
   const { latestData } = await chrome.storage.local.get("latestData");
   if (latestData) {
     renderData(latestData);
   } else {
-    const { portfolio } = await chrome.storage.sync.get("portfolio");
-    if (!portfolio || !portfolio.accounts?.length) {
-      showEmpty();
-    } else {
-      document.getElementById("holdingsTab").innerHTML =
-        '<div class="empty">正在加载数据...</div>';
-      refresh();
-    }
+    document.getElementById("holdingsTab").innerHTML =
+      '<div class="empty">\u6b63\u5728\u52a0\u8f7d\u6570\u636e...</div>';
+    refresh();
   }
 });
 
@@ -164,7 +168,7 @@ async function refresh() {
 function showSettings() {
   document.getElementById("mainView").style.display = "none";
   document.querySelector(".footer").style.display = "none";
-  document.getElementById("settingsView").style.display = "";
+  document.getElementById("settingsView").classList.remove("hidden");
 
   chrome.storage.sync.get("portfolio", ({ portfolio }) => {
     if (portfolio) {
@@ -176,7 +180,7 @@ function showSettings() {
 function showMain() {
   document.getElementById("mainView").style.display = "";
   document.querySelector(".footer").style.display = "";
-  document.getElementById("settingsView").style.display = "none";
+  document.getElementById("settingsView").classList.add("hidden");
 }
 
 async function saveConfig() {

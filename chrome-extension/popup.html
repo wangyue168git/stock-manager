@@ -40,7 +40,8 @@ body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSyst
 .btn-primary:hover { background: #4338ca; }
 .empty { text-align: center; padding: 40px 20px; color: #94a3b8; font-size: 13px; }
 .empty button { margin-top: 12px; }
-.settings { display: none; padding: 16px; }
+.settings { padding: 16px; }
+.settings.hidden { display: none; }
 .settings h2 { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
 .settings textarea { width: 100%; height: 200px; font-family: "SF Mono", monospace; font-size: 11px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; resize: vertical; }
 .settings .hint { font-size: 10px; color: #94a3b8; margin-top: 4px; }
@@ -91,7 +92,7 @@ body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSyst
     <div id="attributionTab" class="holdings" style="display:none"></div>
   </div>
 
-  <div id="settingsView" class="settings">
+  <div id="settingsView" class="settings hidden">
     <h2>配置持仓</h2>
     <p style="font-size:11px;color:#64748b;margin-bottom:8px">粘贴 portfolio.json 内容，或从 Web 版导入</p>
     <textarea id="configText" placeholder='{"accounts":[...]}'></textarea>
