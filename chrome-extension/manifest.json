@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "股票组合追踪器",
+  "version": "1.0.0",
+  "description": "实时追踪 A股/美股/加密货币 投资组合，全球可用",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://hq.sinajs.cn/*",
+    "https://api.coinbase.com/*",
+    "https://open.er-api.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

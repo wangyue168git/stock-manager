@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f8fafc; color: #1e293b; overflow-y: auto; }
+.header { background: linear-gradient(135deg, #4f46e5, #6366f1); color: white; padding: 16px; }
+.header h1 { font-size: 16px; font-weight: 700; }
+.header .sub { font-size: 11px; opacity: 0.8; margin-top: 2px; }
+.summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 16px; background: white; border-bottom: 1px solid #e2e8f0; }
+.summary-card { text-align: center; }
+.summary-card .label { font-size: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
+.summary-card .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+.summary-card .value.up { color: #ef4444; }
+.summary-card .value.down { color: #10b981; }
+.tabs { display: flex; border-bottom: 1px solid #e2e8f0; background: white; }
+.tab { flex: 1; padding: 8px; text-align: center; font-size: 12px; cursor: pointer; color: #64748b; border-bottom: 2px solid transparent; transition: all .2s; }
+.tab.active { color: #4f46e5; border-bottom-color: #4f46e5; font-weight: 600; }
+.holdings { padding: 8px 12px; }
+.holding-row { display: flex; align-items: center; padding: 8px 8px; border-radius: 8px; margin-bottom: 2px; transition: background .15s; }
+.holding-row:hover { background: white; }
+.h-info { flex: 1; min-width: 0; }
+.h-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.h-symbol { font-size: 10px; color: #94a3b8; }
+.h-price { text-align: right; min-width: 80px; }
+.h-price .price { font-size: 13px; font-weight: 600; font-family: "SF Mono", monospace; }
+.h-price .change { font-size: 11px; font-family: "SF Mono", monospace; }
+.h-pnl { text-align: right; min-width: 90px; margin-left: 8px; }
+.h-pnl .pnl { font-size: 12px; font-weight: 600; font-family: "SF Mono", monospace; }
+.h-pnl .pnl-pct { font-size: 10px; color: #94a3b8; }
+.up { color: #ef4444; }
+.down { color: #10b981; }
+.badge-ah { font-size: 9px; background: #fef3c7; color: #d97706; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
+.footer { padding: 8px 16px; text-align: center; border-top: 1px solid #e2e8f0; background: white; }
+.footer .time { font-size: 10px; color: #94a3b8; }
+.footer .actions { display: flex; gap: 8px; margin-top: 6px; justify-content: center; }
+.btn { font-size: 11px; padding: 4px 12px; border-radius: 6px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all .15s; }
+.btn:hover { background: #f1f5f9; }
+.btn-primary { background: #4f46e5; color: white; border-color: #4f46e5; }
+.btn-primary:hover { background: #4338ca; }
+.empty { text-align: center; padding: 40px 20px; color: #94a3b8; font-size: 13px; }
+.empty button { margin-top: 12px; }
+.settings { display: none; padding: 16px; }
+.settings h2 { font-size: 14px; font-weight: 700; margin-bottom: 12px; }
+.settings textarea { width: 100%; height: 200px; font-family: "SF Mono", monospace; font-size: 11px; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; resize: vertical; }
+.settings .hint { font-size: 10px; color: #94a3b8; margin-top: 4px; }
+.mask-mode .mask { filter: blur(6px); user-select: none; }
+.rate-bar { display: flex; justify-content: space-between; align-items: center; padding: 4px 16px; background: #f1f5f9; font-size: 10px; color: #64748b; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h1>投资组合追踪器</h1>
+    <div class="sub">A股 · 美股 · 加密货币 · 全球可用</div>
+  </div>
+
+  <div id="mainView">
+    <div class="summary" id="summary">
+      <div class="summary-card">
+        <div class="label">总资产</div>
+        <div class="value mask" id="totalAssets">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">总盈亏</div>
+        <div class="value mask" id="totalPnl">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">今日涨跌</div>
+        <div class="value mask" id="todayChg">--</div>
+      </div>
+      <div class="summary-card">
+        <div class="label">汇率 USD/CNY</div>
+        <div class="value" id="rateDisplay" style="font-size:14px;color:#64748b">--</div>
+      </div>
+    </div>
+
+    <div class="rate-bar">
+      <span id="updateTime">--</span>
+      <span>
+        <button class="btn" id="maskBtn" onclick="toggleMask()" style="padding:2px 8px;font-size:10px">👁 遮掩</button>
+      </span>
+    </div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="holdings" onclick="switchTab('holdings')">持仓明细</div>
+      <div class="tab" data-tab="attribution" onclick="switchTab('attribution')">收益归因</div>
+    </div>
+
+    <div id="holdingsTab" class="holdings"></div>
+    <div id="attributionTab" class="holdings" style="display:none"></div>
+  </div>
+
+  <div id="settingsView" class="settings">
+    <h2>配置持仓</h2>
+    <p style="font-size:11px;color:#64748b;margin-bottom:8px">粘贴 portfolio.json 内容，或从 Web 版导入</p>
+    <textarea id="configText" placeholder='{"accounts":[...]}'></textarea>
+    <div class="hint">格式与 Web 版 portfolio.json 完全一致</div>
+    <div style="margin-top:8px;display:flex;gap:8px">
+      <button class="btn" onclick="loadFromServer()">从服务器导入</button>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn" onclick="showMain()">取消</button>
+      <button class="btn btn-primary" onclick="saveConfig()">保存</button>
+    </div>
+    <div id="serverImport" style="margin-top:12px;display:none">
+      <input id="serverUrl" placeholder="http://localhost:3457" style="width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
+      <button class="btn btn-primary" style="margin-top:6px" onclick="doImport()">导入</button>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="actions">
+      <button class="btn btn-primary" onclick="refresh()">刷新</button>
+      <button class="btn" onclick="showSettings()">设置</button>
+    </div>
+  </div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
