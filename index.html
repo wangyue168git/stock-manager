@@ -20,6 +20,7 @@
         .conn-dot.online { background: #10b981; animation: pulse 2s infinite; }
         .conn-dot.offline { background: #ef4444; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+        body.mask-mode .mask-amount { filter: blur(8px); user-select: none; pointer-events: none; }
     </style>
 </head>
 <body class="bg-slate-50 min-h-screen p-4 md:p-8">
@@ -30,6 +31,7 @@
                 <p class="text-slate-500">归集 A股 与 美股 持仓，实时计算风险敞口</p>
             </div>
             <div class="flex items-center gap-3 text-sm text-slate-400 mt-2">
+                <button onclick="toggleMask()" id="maskBtn" class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition text-xs font-medium" title="遮掩模式：隐藏金额">&#128065; 遮掩</button>
                 <span class="conn-dot" id="connDot"></span>
                 <span id="connLabel">Connecting...</span>
                 <span id="updateTime"></span>
@@ -40,17 +42,17 @@
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <div class="glass-card p-6 rounded-2xl shadow-sm">
                 <p class="text-sm text-slate-500 mb-1">总资产 (估值 CNY)</p>
-                <h2 id="totalAssets" class="text-3xl font-bold text-indigo-600">¥ 0.00</h2>
-                <p class="text-xs text-slate-400 mt-1" id="totalUSD"></p>
+                <h2 id="totalAssets" class="text-3xl font-bold text-indigo-600 mask-amount">¥ 0.00</h2>
+                <p class="text-xs text-slate-400 mt-1 mask-amount" id="totalUSD"></p>
             </div>
             <div class="glass-card p-6 rounded-2xl shadow-sm">
                 <p class="text-sm text-slate-500 mb-1">总盈亏</p>
-                <h2 id="totalPnl" class="text-3xl font-bold text-emerald-600">--</h2>
+                <h2 id="totalPnl" class="text-3xl font-bold text-emerald-600 mask-amount">--</h2>
                 <p class="text-xs text-slate-400 mt-1" id="totalPnlPct"></p>
             </div>
             <div class="glass-card p-6 rounded-2xl shadow-sm">
                 <p class="text-sm text-slate-500 mb-1">今日涨跌</p>
-                <h2 id="todayChange" class="text-3xl font-bold text-orange-500">--</h2>
+                <h2 id="todayChange" class="text-3xl font-bold text-orange-500 mask-amount">--</h2>
                 <p class="text-xs text-slate-400 mt-1" id="todayChangePct"></p>
             </div>
             <div class="glass-card p-6 rounded-2xl shadow-sm">
@@ -72,7 +74,7 @@
                     <button onclick="setRange('all')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="all">ALL</button>
                 </div>
             </div>
-            <canvas id="profitChart" height="100"></canvas>
+            <canvas id="profitChart" height="100" class="mask-amount"></canvas>
             <p class="text-xs text-slate-400 mt-2" id="chartInfo">数据记录中，曲线将随时间积累逐渐丰富</p>
         </div>
 
@@ -187,6 +189,22 @@
 let ws, portfolioData = null, prevPrices = {};
 let portfolioChart = null, marketChart = null, profitChart = null;
 let chartRange = '1d';
+let maskMode = localStorage.getItem('maskMode') === '1';
+
+function toggleMask() {
+    maskMode = !maskMode;
+    localStorage.setItem('maskMode', maskMode ? '1' : '0');
+    applyMask();
+}
+function applyMask() {
+    document.body.classList.toggle('mask-mode', maskMode);
+    const btn = document.getElementById('maskBtn');
+    btn.innerHTML = maskMode ? '&#128064; 取消遮掩' : '&#128065; 遮掩';
+    btn.className = maskMode
+        ? 'px-3 py-1.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition text-xs font-medium'
+        : 'px-3 py-1.5 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-100 transition text-xs font-medium';
+}
+applyMask();
 
 // ---- WebSocket ----
 function connect() {
@@ -326,15 +344,15 @@ function render(data) {
                         <div class="font-semibold text-slate-800">${esc(h.name)}</div>
                         <div class="text-xs text-slate-400">${h.symbol} · ${mktLabel}</div>
                     </td>
-                    <td class="py-3.5 px-4 font-mono text-sm ${colorCls}">${sym}${fmtN(h.currentPrice)}${h.afterHours ? '<span class="ml-1 text-xs bg-amber-100 text-amber-700 px-1 py-0.5 rounded">盘后</span>' : ''}</td>
-                    <td class="py-3.5 px-4 text-sm text-slate-600">${h.shares}</td>
-                    <td class="py-3.5 px-4 text-sm text-slate-500 font-mono">${sym}${fmtN(h.costPrice)}</td>
+                    <td class="py-3.5 px-4 font-mono text-sm ${colorCls}"><span class="mask-amount">${sym}${fmtN(h.currentPrice)}</span>${h.afterHours ? '<span class="ml-1 text-xs bg-amber-100 text-amber-700 px-1 py-0.5 rounded">盘后</span>' : ''}</td>
+                    <td class="py-3.5 px-4 text-sm text-slate-600 mask-amount">${h.shares}</td>
+                    <td class="py-3.5 px-4 text-sm text-slate-500 font-mono mask-amount">${sym}${fmtN(h.costPrice)}</td>
                     <td class="py-3.5 px-4 text-sm font-semibold ${colorCls}">${arrow} ${cp >= 0 ? '+' : ''}${cp.toFixed(2)}%</td>
-                    <td class="py-3.5 px-4 text-sm font-semibold ${pnlCls}">
+                    <td class="py-3.5 px-4 text-sm font-semibold ${pnlCls} mask-amount">
                         ${h.pnl >= 0 ? '+' : ''}${sym}${fmtW(h.pnl)}
                         <span class="text-xs text-slate-400 ml-1">${h.pnlPercent >= 0 ? '+' : ''}${h.pnlPercent.toFixed(1)}%</span>
                     </td>
-                    <td class="py-3.5 px-4 text-right">
+                    <td class="py-3.5 px-4 text-right mask-amount">
                         <span class="font-mono font-semibold text-slate-700">${sym}${fmtW(h.marketValue)}</span>
                     </td>
                     <td class="py-3.5 px-2 text-right">
@@ -348,10 +366,10 @@ function render(data) {
             rowsHtml += `
             <tr class="bg-slate-50/80">
                 <td class="py-3 px-4 font-semibold text-slate-500 text-sm" colspan="3">小计</td>
-                <td class="py-3 px-4 text-sm text-slate-400 font-mono">${sym}${fmtW(accCost)}</td>
+                <td class="py-3 px-4 text-sm text-slate-400 font-mono mask-amount">${sym}${fmtW(accCost)}</td>
                 <td class="py-3 px-4"></td>
-                <td class="py-3 px-4 text-sm font-semibold ${accPnlCls}">${accPnl >= 0 ? '+' : ''}${sym}${fmtW(accPnl)}</td>
-                <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">${sym}${fmtW(accMV)}</td>
+                <td class="py-3 px-4 text-sm font-semibold ${accPnlCls} mask-amount">${accPnl >= 0 ? '+' : ''}${sym}${fmtW(accPnl)}</td>
+                <td class="py-3 px-4 text-right font-mono font-bold text-slate-800 mask-amount">${sym}${fmtW(accMV)}</td>
                 <td></td>
             </tr>`;
         }
