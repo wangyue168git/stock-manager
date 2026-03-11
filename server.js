@@ -781,6 +781,110 @@ async function refreshNews() {
   }
 }
 
+// ---- Dividend Tracking ----
+const dividendCache = {};
+let divLastFetch = 0;
+
+function fetchDividendUS(symbol) {
+  return new Promise((resolve) => {
+    // Use Yahoo Finance v8 chart API to get dividend events
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1y&interval=3mo&events=dividends`;
+    https.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "application/json",
+      },
+      timeout: 10000,
+    }, (res) => {
+      if (res.statusCode === 429) {
+        console.log(`Yahoo Finance rate limited for ${symbol}, will retry later`);
+        resolve(null);
+        return;
+      }
+      if (res.statusCode !== 200) { resolve(null); return; }
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(data);
+          const result = j.chart?.result?.[0];
+          if (!result) { resolve(null); return; }
+          const events = result.events?.dividends || {};
+          const divList = Object.values(events).map(d => ({
+            date: new Date(d.date * 1000).toISOString().slice(0, 10),
+            amount: Math.round(d.amount * 10000) / 10000,
+          })).sort((a, b) => a.date.localeCompare(b.date));
+          const annualDiv = divList.reduce((sum, d) => sum + d.amount, 0);
+          resolve({ dividends: divList, annualDividend: Math.round(annualDiv * 100) / 100 });
+        } catch (e) { resolve(null); }
+      });
+    }).on("error", () => resolve(null));
+  });
+}
+
+function fetchDividendCN(symbol) {
+  return new Promise((resolve) => {
+    const url = `https://datacenter.eastmoney.com/securities/api/data/v1/get?reportName=RPT_SHAREBONUS_DET&columns=ALL&filter=(SECURITY_CODE%3D%22${symbol}%22)&pageNumber=1&pageSize=5&sortTypes=-1&sortColumns=EX_DIVIDEND_DATE&source=HSF10&client=PC`;
+    https.get(url, {
+      headers: { "User-Agent": "Mozilla/5.0", Referer: "https://emweb.securities.eastmoney.com" },
+      timeout: 8000,
+    }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(data);
+          if (!j.result?.data?.length) { resolve(null); return; }
+          const records = j.result.data;
+          const divList = records.map(r => ({
+            date: r.EX_DIVIDEND_DATE ? r.EX_DIVIDEND_DATE.slice(0, 10) : "",
+            amount: Math.round((r.PRETAX_BONUS_RMB || 0) / 10 * 10000) / 10000, // per 10 shares → per share
+            plan: r.IMPL_PLAN_PROFILE || r.ASSIGN_DETAIL || "",
+          })).filter(d => d.date);
+          // Sum dividends from the last ~12 months for annual estimate
+          const oneYearAgo = new Date(); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+          const recentDivs = divList.filter(d => new Date(d.date) >= oneYearAgo);
+          const annualDiv = recentDivs.reduce((s, d) => s + d.amount, 0);
+          resolve({
+            dividends: divList,
+            annualDividend: Math.round(annualDiv * 10000) / 10000,
+            latestPlan: divList[0]?.plan || "",
+          });
+        } catch (e) { resolve(null); }
+      });
+    }).on("error", () => resolve(null));
+  });
+}
+
+async function refreshDividends() {
+  if (Date.now() - divLastFetch < 24 * 60 * 60 * 1000 && Object.keys(dividendCache).length > 0) return;
+  divLastFetch = Date.now();
+  console.log("Refreshing dividend data...");
+  const portfolio = loadPortfolio();
+  const holdings = [];
+  portfolio.accounts.forEach((acc) => {
+    acc.holdings.forEach((h) => {
+      if (h.market !== "crypto" && !holdings.find((x) => x.symbol === h.symbol)) holdings.push(h);
+    });
+  });
+  // Fetch sequentially with small delay to avoid API throttling
+  for (const h of holdings) {
+    try {
+      const isUS = h.market === "nasdaq" || h.market === "nyse";
+      const d = isUS ? await fetchDividendUS(h.symbol) : await fetchDividendCN(h.symbol);
+      if (d) dividendCache[h.symbol] = d;
+      if (isUS) await new Promise((r) => setTimeout(r, 1500)); // rate limit Yahoo (strict)
+    } catch (e) {}
+  }
+  const cached = Object.keys(dividendCache).length;
+  const total = holdings.length;
+  console.log(`Dividend data updated for ${cached}/${total} stocks`);
+  // If many failed (likely rate limited), retry after 5 minutes
+  if (cached < total * 0.5 && cached < 5) {
+    divLastFetch = Date.now() - 24 * 60 * 60 * 1000 + 5 * 60 * 1000; // retry in 5 min
+  }
+}
+
 // WebSocket
 const wss = new WebSocketServer({ server });
 let latestData = null;
@@ -795,6 +899,7 @@ async function refreshPrices() {
     await refreshKlines(prices);
     await refreshBenchmarks();
     refreshNews(); // non-blocking
+    refreshDividends(); // non-blocking, daily refresh
 
     const result = {
       exchangeRate: portfolio.exchangeRate,
@@ -839,6 +944,14 @@ async function refreshPrices() {
             pnlPercent: pnlPct,
             afterHours: p.afterHours || false,
             tech,
+            dividend: dividendCache[fixed.symbol] ? {
+              annualDividend: dividendCache[fixed.symbol].annualDividend,
+              dividendYield: price > 0 && dividendCache[fixed.symbol].annualDividend > 0
+                ? Math.round(dividendCache[fixed.symbol].annualDividend / price * 10000) / 100 : 0,
+              annualIncome: Math.round((dividendCache[fixed.symbol].annualDividend || 0) * h.shares * 100) / 100,
+              dividends: dividendCache[fixed.symbol].dividends || [],
+              latestPlan: dividendCache[fixed.symbol].latestPlan || null,
+            } : null,
           };
         }),
       })),
@@ -857,6 +970,30 @@ async function refreshPrices() {
       });
     });
     recordSnapshot(totalCNY, totalCost);
+
+    // Return Attribution
+    const attribution = [];
+    result.accounts.forEach((acc) => {
+      const cur = acc.currency || "CNY";
+      acc.holdings.forEach((h) => {
+        const mul = cur === "USD" ? rate : cur === "HKD" ? rate / 7.8 : 1;
+        const pnlCNY = (h.pnl || 0) * mul;
+        const mvCNY = (h.marketValue || 0) * mul;
+        const dayChgCNY = (h.change || 0) * h.shares * mul;
+        attribution.push({
+          symbol: h.symbol,
+          name: h.name,
+          pnlCNY: Math.round(pnlCNY * 100) / 100,
+          dayChgCNY: Math.round(dayChgCNY * 100) / 100,
+          contribution: totalCost > 0 ? Math.round(pnlCNY / totalCost * 10000) / 100 : 0,
+          dayContribution: totalCNY > 0 ? Math.round(dayChgCNY / totalCNY * 10000) / 100 : 0,
+          weight: totalCNY > 0 ? Math.round(mvCNY / totalCNY * 10000) / 100 : 0,
+          pnlPercent: h.pnlPercent ? Math.round(h.pnlPercent * 100) / 100 : 0,
+        });
+      });
+    });
+    attribution.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+
     const snapshots = loadHistory().snapshots;
     result.history = snapshots;
     result.benchmarks = {};
@@ -866,6 +1003,13 @@ async function refreshPrices() {
     result.riskMetrics = calcRiskMetrics(snapshots);
     result.correlation = calcCorrelationMatrix();
     result.news = newsCache;
+    result.attribution = attribution;
+    result.dividends = dividendCache;
+    result.rateInfo = {
+      USD_CNY: cachedRate?.USD_CNY || rate,
+      USD_HKD: cachedRate?.USD_HKD || 7.82,
+      lastUpdate: rateLastFetch ? new Date(rateLastFetch).toISOString() : null,
+    };
 
     latestData = result;
     const msg = JSON.stringify({ type: "portfolio", data: result });
