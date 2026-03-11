@@ -641,62 +641,85 @@ function updateProfitChart(snapshots) {
 
     // Benchmark comparison mode: show % returns
     if (showBenchmark && portfolioData && portfolioData.benchmarks) {
-        const baseV = filtered[0].v;
-        const portfolioReturns = filtered.map(s => baseV > 0 ? ((s.v - baseV) / baseV * 100) : 0);
-        const datasets = [{
-            label: '我的组合',
-            data: portfolioReturns,
-            borderColor: '#6366f1',
-            backgroundColor: 'rgba(99,102,241,0.08)',
-            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
-        }];
         const bmColors = { '沪深300': '#ef4444', '纳斯达克': '#10b981', '标普500': '#f59e0b' };
-        const startDate = filtered[0].t.slice(0, 10);
-        for (const [bmName, bmData] of Object.entries(portfolioData.benchmarks)) {
-            if (!bmData || bmData.length < 2) continue;
-            // Find starting point aligned with portfolio start date
-            let startIdx = bmData.findIndex(d => d.date >= startDate);
-            if (startIdx < 0) startIdx = 0;
-            const bmBase = bmData[startIdx].close;
-            if (bmBase <= 0) continue;
-            // Build date->return map
-            const bmReturns = {};
-            for (let i = startIdx; i < bmData.length; i++) {
-                bmReturns[bmData[i].date] = (bmData[i].close - bmBase) / bmBase * 100;
-            }
-            // Align with filtered timestamps
-            let lastBmReturn = 0;
-            const aligned = filtered.map(s => {
-                const day = s.t.slice(0, 10);
-                if (bmReturns[day] !== undefined) lastBmReturn = bmReturns[day];
-                return Math.round(lastBmReturn * 100) / 100;
-            });
-            datasets.push({
-                label: bmName,
-                data: aligned,
-                borderColor: bmColors[bmName] || '#94a3b8',
-                fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.8,
-                borderDash: [4, 3],
-            });
+        // Use benchmark date axis as the primary timeline
+        // Find the longest benchmark to use as base timeline
+        let baseDates = [];
+        for (const bmData of Object.values(portfolioData.benchmarks)) {
+            if (bmData && bmData.length > baseDates.length) baseDates = bmData.map(d => d.date);
         }
-        profitChart = new Chart(ctx, {
-            type: 'line',
-            data: { labels, datasets },
-            options: {
-                responsive: true,
-                interaction: { mode: 'index', intersect: false },
-                plugins: {
-                    legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
-                    tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}%` } }
-                },
-                scales: {
-                    x: { display: true, grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', maxTicksLimit: 8 } },
-                    y: { display: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, color: '#94a3b8', callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' } }
-                }
+        if (baseDates.length < 2) { /* fallback to normal mode below */ }
+        else {
+            const bmLabels = baseDates.map(d => { const [y,m,dd] = d.split('-'); return `${parseInt(m)}/${parseInt(dd)}`; });
+
+            // Portfolio returns: group history by day, align to benchmark dates
+            const portfolioByDay = {};
+            snapshots.forEach(s => { portfolioByDay[s.t.slice(0, 10)] = s.v; });
+            const portfolioDays = Object.keys(portfolioByDay).sort();
+            let portfolioBase = portfolioDays.length > 0 ? portfolioByDay[portfolioDays[0]] : 0;
+            // Find the benchmark start date that aligns with portfolio start
+            let pfStartIdx = portfolioDays.length > 0 ? baseDates.indexOf(portfolioDays[0]) : -1;
+            // If portfolio started after benchmark, use portfolio start as base for benchmark too
+            const commonStartIdx = pfStartIdx >= 0 ? pfStartIdx : 0;
+
+            const datasets = [];
+
+            // Benchmark datasets - all start from commonStartIdx normalized to 0%
+            for (const [bmName, bmData] of Object.entries(portfolioData.benchmarks)) {
+                if (!bmData || bmData.length < 2) continue;
+                const bmBase = bmData[commonStartIdx] ? bmData[commonStartIdx].close : bmData[0].close;
+                if (bmBase <= 0) continue;
+                const bmReturns = baseDates.map((date, i) => {
+                    const pt = bmData.find(d => d.date === date);
+                    return pt ? Math.round((pt.close - bmBase) / bmBase * 10000) / 100 : null;
+                });
+                datasets.push({
+                    label: bmName,
+                    data: bmReturns,
+                    borderColor: bmColors[bmName] || '#94a3b8',
+                    fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2,
+                    spanGaps: true,
+                });
             }
-        });
-        document.getElementById('chartInfo').textContent = `基准对比模式 · ${filtered.length} 个数据点 · 收益率%`;
-        return;
+
+            // Portfolio dataset - align to benchmark date axis
+            if (portfolioDays.length > 0 && portfolioBase > 0) {
+                let lastPfReturn = null;
+                const pfReturns = baseDates.map(date => {
+                    if (portfolioByDay[date] !== undefined) {
+                        lastPfReturn = Math.round((portfolioByDay[date] - portfolioBase) / portfolioBase * 10000) / 100;
+                    }
+                    return lastPfReturn;
+                });
+                datasets.unshift({
+                    label: '我的组合',
+                    data: pfReturns,
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99,102,241,0.08)',
+                    fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
+                    spanGaps: true,
+                });
+            }
+
+            profitChart = new Chart(ctx, {
+                type: 'line',
+                data: { labels: bmLabels, datasets },
+                options: {
+                    responsive: true,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
+                        tooltip: { callbacks: { label: (c) => c.parsed.y !== null ? `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}%` : '' } }
+                    },
+                    scales: {
+                        x: { display: true, grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', maxTicksLimit: 10 } },
+                        y: { display: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, color: '#94a3b8', callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' } }
+                    }
+                }
+            });
+            document.getElementById('chartInfo').textContent = `基准对比模式 · 近 ${baseDates.length} 个交易日收益率% · 我的组合数据将随时间积累`;
+            return;
+        }
     }
 
     // Normal mode: absolute values
