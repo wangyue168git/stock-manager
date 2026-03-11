@@ -219,26 +219,50 @@ function fetchStockPrices(holdings) {
               let price, open, high, low, prevClose, name;
 
               if (isUS) {
-                // Sina US: [0]name,[1]price,[2]changePct,[3]timestamp,[4]change,[5]open,[6]high,[7]low,...
+                // Sina US fields:
+                // [0]name [1]price [2]changePct% [3]timestamp [4]change [5]open [6]high [7]low
+                // [21]afterHoursPrice [22]ahChangePct% [23]ahChange [24]ahTime [25]closeTime [26]closePrice
                 name = parts[0] || h.symbol;
-                price = parseFloat(parts[1]) || 0;
-                const changePct = parseFloat(parts[2]) || 0;
-                const change = parseFloat(parts[4]) || 0;
-                prevClose = price - change;
-                high = parseFloat(parts[6]) || price;
-                low = parseFloat(parts[7]) || price;
-                open = parseFloat(parts[5]) || price;
-                const secid = `${isUS ? "105" : MARKET_MAP[h.market]}.${h.symbol}`;
-                // Store with resolved secid for US stocks
-                if (h.market === "nasdaq") {
-                  resolvedSecids[h.symbol] = `105.${h.symbol}`;
-                } else if (h.market === "nyse") {
-                  resolvedSecids[h.symbol] = `106.${h.symbol}`;
+                const regPrice = parseFloat(parts[1]) || 0;
+                const regChangePct = parseFloat(parts[2]) || 0;
+                const regChange = parseFloat(parts[4]) || 0;
+                const ahPrice = parseFloat(parts[21]) || 0;
+                const ahChangePct = parseFloat(parts[22]) || 0;
+                const ahChange = parseFloat(parts[23]) || 0;
+                const closePrice = parseFloat(parts[26]) || 0;
+
+                // Use after-hours price if available, otherwise regular price
+                if (ahPrice > 0) {
+                  price = ahPrice;
+                  // After-hours change is relative to regular close
+                  prevClose = closePrice || (ahPrice - ahChange);
+                  const totalChange = price - prevClose;
+                  const totalChangePct = prevClose ? ((totalChange / prevClose) * 100) : 0;
+                  high = parseFloat(parts[6]) || price;
+                  low = parseFloat(parts[7]) || price;
+                  open = parseFloat(parts[5]) || price;
+                  const secid = `105.${h.symbol}`;
+                  if (h.market === "nasdaq") resolvedSecids[h.symbol] = `105.${h.symbol}`;
+                  else if (h.market === "nyse") resolvedSecids[h.symbol] = `106.${h.symbol}`;
+                  prices[resolvedSecids[h.symbol] || secid] = {
+                    price, changePercent: parseFloat(totalChangePct.toFixed(2)),
+                    change: parseFloat(totalChange.toFixed(4)), name,
+                    high, low, open, prevClose, afterHours: true,
+                  };
+                } else {
+                  price = regPrice;
+                  prevClose = price - regChange;
+                  high = parseFloat(parts[6]) || price;
+                  low = parseFloat(parts[7]) || price;
+                  open = parseFloat(parts[5]) || price;
+                  const secid = `105.${h.symbol}`;
+                  if (h.market === "nasdaq") resolvedSecids[h.symbol] = `105.${h.symbol}`;
+                  else if (h.market === "nyse") resolvedSecids[h.symbol] = `106.${h.symbol}`;
+                  prices[resolvedSecids[h.symbol] || secid] = {
+                    price, changePercent: regChangePct, change: regChange, name,
+                    high, low, open, prevClose,
+                  };
                 }
-                prices[resolvedSecids[h.symbol] || secid] = {
-                  price, changePercent: changePct, change, name,
-                  high, low, open, prevClose,
-                };
               } else {
                 // A-share: name,open,prevClose,price,high,low,...
                 name = parts[0] || h.symbol;
@@ -627,6 +651,7 @@ async function refreshPrices() {
             costValue: cv,
             pnl,
             pnlPercent: pnlPct,
+            afterHours: p.afterHours || false,
             tech,
           };
         }),

@@ -326,7 +326,7 @@ function render(data) {
                         <div class="font-semibold text-slate-800">${esc(h.name)}</div>
                         <div class="text-xs text-slate-400">${h.symbol} · ${mktLabel}</div>
                     </td>
-                    <td class="py-3.5 px-4 font-mono text-sm ${colorCls}">${sym}${fmtN(h.currentPrice)}</td>
+                    <td class="py-3.5 px-4 font-mono text-sm ${colorCls}">${sym}${fmtN(h.currentPrice)}${h.afterHours ? '<span class="ml-1 text-xs bg-amber-100 text-amber-700 px-1 py-0.5 rounded">盘后</span>' : ''}</td>
                     <td class="py-3.5 px-4 text-sm text-slate-600">${h.shares}</td>
                     <td class="py-3.5 px-4 text-sm text-slate-500 font-mono">${sym}${fmtN(h.costPrice)}</td>
                     <td class="py-3.5 px-4 text-sm font-semibold ${colorCls}">${arrow} ${cp >= 0 ? '+' : ''}${cp.toFixed(2)}%</td>
