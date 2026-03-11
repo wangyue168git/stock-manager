@@ -1,17 +1,29 @@
 let maskMode = false;
 let currentTab = "holdings";
 
-// ---- Init ----
+// ---- Bindall events via addEventListener (CSP compliance) ----
 document.addEventListener("DOMContentLoaded", async () => {
+  // Bind button events
+  document.getElementById("maskBtn").addEventListener("click", toggleMask);
+  document.getElementById("tabHoldings").addEventListener("click", () => switchTab("holdings"));
+  document.getElementById("tabAttribution").addEventListener("click", () => switchTab("attribution"));
+  document.getElementById("btnRefresh").addEventListener("click", refresh);
+  document.getElementById("btnSettings").addEventListener("click", showSettings);
+  document.getElementById("btnLoadServer").addEventListener("click", loadFromServer);
+  document.getElementById("btnCancel").addEventListener("click", showMain);
+  document.getElementById("btnSave").addEventListener("click", saveConfig);
+  document.getElementById("btnDoImport").addEventListener("click", doImport);
+
+  // Restore mask mode
   const { maskMode: stored } = await chrome.storage.local.get("maskMode");
   maskMode = !!stored;
   applyMask();
 
+  // Load cached data or prompt setup
   const { latestData } = await chrome.storage.local.get("latestData");
   if (latestData) {
     renderData(latestData);
   } else {
-    // Check if portfolio exists
     const { portfolio } = await chrome.storage.sync.get("portfolio");
     if (!portfolio || !portfolio.accounts?.length) {
       showEmpty();
@@ -29,23 +41,21 @@ function renderData(data) {
 
   const { totalCNY, totalPnl, totalPnlPct, todayChg, rate } = data;
 
-  document.getElementById("totalAssets").textContent = `¥${fmtW(totalCNY)}`;
+  document.getElementById("totalAssets").textContent = "\u00a5" + fmtW(totalCNY);
 
   const pnlEl = document.getElementById("totalPnl");
-  pnlEl.textContent = `${totalPnl >= 0 ? "+" : ""}¥${fmtW(totalPnl)}`;
-  pnlEl.className = `value mask ${totalPnl >= 0 ? "up" : "down"}`;
-
-  const pctText = ` (${totalPnlPct >= 0 ? "+" : ""}${totalPnlPct.toFixed(2)}%)`;
-  pnlEl.textContent += pctText;
+  pnlEl.textContent = (totalPnl >= 0 ? "+" : "") + "\u00a5" + fmtW(totalPnl) +
+    " (" + (totalPnlPct >= 0 ? "+" : "") + totalPnlPct.toFixed(2) + "%)";
+  pnlEl.className = "value mask " + (totalPnl >= 0 ? "up" : "down");
 
   const chgEl = document.getElementById("todayChg");
-  chgEl.textContent = `${todayChg >= 0 ? "+" : ""}¥${fmtW(todayChg)}`;
-  chgEl.className = `value mask ${todayChg >= 0 ? "up" : "down"}`;
+  chgEl.textContent = (todayChg >= 0 ? "+" : "") + "\u00a5" + fmtW(todayChg);
+  chgEl.className = "value mask " + (todayChg >= 0 ? "up" : "down");
 
   document.getElementById("rateDisplay").textContent = rate ? rate.toFixed(4) : "--";
 
   const time = data.timestamp ? new Date(data.timestamp).toLocaleTimeString("zh-CN") : "--";
-  document.getElementById("updateTime").textContent = `更新于 ${time}`;
+  document.getElementById("updateTime").textContent = "\u66f4\u65b0\u4e8e " + time;
 
   renderHoldings(data.holdings, data.totalCNY);
   renderAttribution(data.holdings, data.totalCost, data.totalCNY);
@@ -54,35 +64,34 @@ function renderData(data) {
 function renderHoldings(holdings, totalCNY) {
   const container = document.getElementById("holdingsTab");
   if (!holdings.length) {
-    container.innerHTML = '<div class="empty">暂无持仓</div>';
+    container.innerHTML = '<div class="empty">\u6682\u65e0\u6301\u4ed3</div>';
     return;
   }
 
-  // Sort by market value
   const sorted = [...holdings].sort((a, b) => (b.mvCNY || 0) - (a.mvCNY || 0));
 
   let html = "";
   sorted.forEach((h) => {
     const cpCls = h.changePct > 0 ? "up" : h.changePct < 0 ? "down" : "";
     const pnlCls = h.pnl >= 0 ? "up" : "down";
-    const arrow = h.changePct > 0 ? "▲" : h.changePct < 0 ? "▼" : "";
+    const arrow = h.changePct > 0 ? "\u25b2" : h.changePct < 0 ? "\u25bc" : "";
     const weight = totalCNY > 0 ? ((h.mvCNY || 0) / totalCNY * 100).toFixed(1) : "0";
 
-    html += `
-    <div class="holding-row">
-      <div class="h-info">
-        <div class="h-name">${esc(h.name)}</div>
-        <div class="h-symbol">${h.symbol} · ${weight}%</div>
-      </div>
-      <div class="h-price">
-        <div class="price ${cpCls}">${h.sym}${fmtN(h.currentPrice)}${h.afterHours ? '<span class="badge-ah">盘后</span>' : ""}</div>
-        <div class="change ${cpCls}">${arrow} ${h.changePct >= 0 ? "+" : ""}${h.changePct.toFixed(2)}%</div>
-      </div>
-      <div class="h-pnl">
-        <div class="pnl ${pnlCls} mask">${h.pnl >= 0 ? "+" : ""}${h.sym}${fmtW(h.pnl)}</div>
-        <div class="pnl-pct">${h.pnlPct >= 0 ? "+" : ""}${h.pnlPct.toFixed(1)}%</div>
-      </div>
-    </div>`;
+    html += '<div class="holding-row">' +
+      '<div class="h-info">' +
+        '<div class="h-name">' + esc(h.name) + '</div>' +
+        '<div class="h-symbol">' + h.symbol + ' \u00b7 ' + weight + '%</div>' +
+      '</div>' +
+      '<div class="h-price">' +
+        '<div class="price ' + cpCls + '">' + h.sym + fmtN(h.currentPrice) +
+          (h.afterHours ? '<span class="badge-ah">\u76d8\u540e</span>' : '') + '</div>' +
+        '<div class="change ' + cpCls + '">' + arrow + ' ' + (h.changePct >= 0 ? '+' : '') + h.changePct.toFixed(2) + '%</div>' +
+      '</div>' +
+      '<div class="h-pnl">' +
+        '<div class="pnl ' + pnlCls + ' mask">' + (h.pnl >= 0 ? '+' : '') + h.sym + fmtW(h.pnl) + '</div>' +
+        '<div class="pnl-pct">' + (h.pnlPct >= 0 ? '+' : '') + h.pnlPct.toFixed(1) + '%</div>' +
+      '</div>' +
+    '</div>';
   });
   container.innerHTML = html;
 }
@@ -90,14 +99,14 @@ function renderHoldings(holdings, totalCNY) {
 function renderAttribution(holdings, totalCost, totalCNY) {
   const container = document.getElementById("attributionTab");
   if (!holdings.length) {
-    container.innerHTML = '<div class="empty">暂无数据</div>';
+    container.innerHTML = '<div class="empty">\u6682\u65e0\u6570\u636e</div>';
     return;
   }
 
   const items = holdings.map((h) => {
-    const pnlCNY = (h.pnl || 0) * (h.currency === "USD" ? (totalCNY / totalCost || 1) : 1);
-    const contribution = totalCost > 0 ? ((h.mvCNY - h.costValue * (h.currency === "USD" ? (totalCNY > 0 ? h.mvCNY / (h.marketValue || 1) : 1) : 1)) / totalCost * 100) : 0;
-    return { ...h, contribution: h.pnl * (h.mvCNY / (h.marketValue || 1)) / (totalCost || 1) * 100 };
+    const pnlCNY = h.pnl * ((h.mvCNY || 0) / (h.marketValue || 1));
+    const contribution = totalCost > 0 ? (pnlCNY / totalCost * 100) : 0;
+    return { name: h.name, contribution };
   }).sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
 
   const maxAbs = Math.max(...items.map((a) => Math.abs(a.contribution)), 0.01);
@@ -109,16 +118,15 @@ function renderAttribution(holdings, totalCost, totalCNY) {
     const barW = Math.abs(a.contribution) / maxAbs * 100;
     const textCls = isPos ? "up" : "down";
 
-    html += `
-    <div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px">
-      <div style="width:60px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">${esc(a.name)}</div>
-      <div style="flex:1;height:14px;background:#f1f5f9;border-radius:7px;overflow:hidden">
-        <div style="height:100%;background:${barColor};border-radius:7px;width:${Math.max(2, barW)}%;transition:width .3s"></div>
-      </div>
-      <div style="width:60px;text-align:right;font-family:monospace" class="${textCls} mask">${a.contribution >= 0 ? "+" : ""}${a.contribution.toFixed(2)}%</div>
-    </div>`;
+    html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:12px">' +
+      '<div style="width:60px;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600">' + esc(a.name) + '</div>' +
+      '<div style="flex:1;height:14px;background:#f1f5f9;border-radius:7px;overflow:hidden">' +
+        '<div style="height:100%;background:' + barColor + ';border-radius:7px;width:' + Math.max(2, barW) + '%;transition:width .3s"></div>' +
+      '</div>' +
+      '<div style="width:60px;text-align:right;font-family:monospace" class="' + textCls + ' mask">' + (a.contribution >= 0 ? '+' : '') + a.contribution.toFixed(2) + '%</div>' +
+    '</div>';
   });
-  html += "</div>";
+  html += '</div>';
   container.innerHTML = html;
 }
 
@@ -141,13 +149,12 @@ function toggleMask() {
 
 function applyMask() {
   document.body.classList.toggle("mask-mode", maskMode);
-  const btn = document.getElementById("maskBtn");
-  btn.textContent = maskMode ? "👁 取消遮掩" : "👁 遮掩";
+  document.getElementById("maskBtn").textContent = maskMode ? "\ud83d\udc41 \u53d6\u6d88\u906e\u63a9" : "\ud83d\udc41 \u906e\u63a9";
 }
 
 // ---- Actions ----
 async function refresh() {
-  document.getElementById("updateTime").textContent = "刷新中...";
+  document.getElementById("updateTime").textContent = "\u5237\u65b0\u4e2d...";
   chrome.runtime.sendMessage({ type: "refresh" }, async () => {
     const { latestData } = await chrome.storage.local.get("latestData");
     if (latestData) renderData(latestData);
@@ -176,14 +183,13 @@ async function saveConfig() {
   const text = document.getElementById("configText").value.trim();
   try {
     const data = JSON.parse(text);
-    if (!data.accounts) throw new Error("缺少 accounts 字段");
+    if (!data.accounts) throw new Error("\u7f3a\u5c11 accounts \u5b57\u6bb5");
     await chrome.storage.sync.set({ portfolio: data });
     showMain();
-    // Clear old data and refresh
     await chrome.storage.local.remove("latestData");
     refresh();
   } catch (e) {
-    alert("JSON 格式错误: " + e.message);
+    alert("JSON \u683c\u5f0f\u9519\u8bef: " + e.message);
   }
 }
 
@@ -192,24 +198,25 @@ function loadFromServer() {
 }
 
 async function doImport() {
-  const url = document.getElementById("serverUrl").value.trim() || "http://localhost:3457";
+  const url = (document.getElementById("serverUrl").value.trim() || "http://localhost:3457").replace(/\/$/, "");
   try {
-    const res = await fetch(`${url}/api/portfolio`);
+    const res = await fetch(url + "/api/portfolio");
     const data = await res.json();
     document.getElementById("configText").value = JSON.stringify(data, null, 2);
     document.getElementById("serverImport").style.display = "none";
   } catch (e) {
-    alert("导入失败: " + e.message);
+    alert("\u5bfc\u5165\u5931\u8d25: " + e.message);
   }
 }
 
 function showEmpty() {
-  document.getElementById("holdingsTab").innerHTML = `
-    <div class="empty">
-      <p>尚未配置持仓</p>
-      <p style="font-size:11px;margin-top:4px">点击下方"设置"按钮添加持仓配置</p>
-      <button class="btn btn-primary" onclick="showSettings()" style="margin-top:12px">配置持仓</button>
-    </div>`;
+  const container = document.getElementById("holdingsTab");
+  container.innerHTML = '<div class="empty">' +
+    '<p>\u5c1a\u672a\u914d\u7f6e\u6301\u4ed3</p>' +
+    '<p style="font-size:11px;margin-top:4px">\u70b9\u51fb\u4e0b\u65b9\u201c\u8bbe\u7f6e\u201d\u6309\u94ae\u6dfb\u52a0\u6301\u4ed3\u914d\u7f6e</p>' +
+    '<button class="btn btn-primary" id="btnEmptySetup" style="margin-top:12px">\u914d\u7f6e\u6301\u4ed3</button>' +
+  '</div>';
+  document.getElementById("btnEmptySetup").addEventListener("click", showSettings);
 }
 
 // ---- Utils ----
@@ -220,7 +227,7 @@ function fmtN(v) {
 
 function fmtW(v) {
   if (v == null) return "--";
-  if (Math.abs(v) >= 10000) return (v / 10000).toFixed(2) + "万";
+  if (Math.abs(v) >= 10000) return (v / 10000).toFixed(2) + "\u4e07";
   return v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 

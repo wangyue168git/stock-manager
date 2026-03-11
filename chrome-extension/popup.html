@@ -33,7 +33,6 @@ body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSyst
 .down { color: #10b981; }
 .badge-ah { font-size: 9px; background: #fef3c7; color: #d97706; padding: 1px 4px; border-radius: 3px; margin-left: 4px; }
 .footer { padding: 8px 16px; text-align: center; border-top: 1px solid #e2e8f0; background: white; }
-.footer .time { font-size: 10px; color: #94a3b8; }
 .footer .actions { display: flex; gap: 8px; margin-top: 6px; justify-content: center; }
 .btn { font-size: 11px; padding: 4px 12px; border-radius: 6px; border: 1px solid #e2e8f0; background: white; color: #64748b; cursor: pointer; transition: all .15s; }
 .btn:hover { background: #f1f5f9; }
@@ -79,13 +78,13 @@ body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSyst
     <div class="rate-bar">
       <span id="updateTime">--</span>
       <span>
-        <button class="btn" id="maskBtn" onclick="toggleMask()" style="padding:2px 8px;font-size:10px">👁 遮掩</button>
+        <button class="btn" id="maskBtn" style="padding:2px 8px;font-size:10px">👁 遮掩</button>
       </span>
     </div>
 
     <div class="tabs">
-      <div class="tab active" data-tab="holdings" onclick="switchTab('holdings')">持仓明细</div>
-      <div class="tab" data-tab="attribution" onclick="switchTab('attribution')">收益归因</div>
+      <div class="tab active" data-tab="holdings" id="tabHoldings">持仓明细</div>
+      <div class="tab" data-tab="attribution" id="tabAttribution">收益归因</div>
     </div>
 
     <div id="holdingsTab" class="holdings"></div>
@@ -98,22 +97,22 @@ body { width: 420px; max-height: 580px; font-family: -apple-system, BlinkMacSyst
     <textarea id="configText" placeholder='{"accounts":[...]}'></textarea>
     <div class="hint">格式与 Web 版 portfolio.json 完全一致</div>
     <div style="margin-top:8px;display:flex;gap:8px">
-      <button class="btn" onclick="loadFromServer()">从服务器导入</button>
+      <button class="btn" id="btnLoadServer">从服务器导入</button>
     </div>
     <div style="margin-top:12px;display:flex;gap:8px">
-      <button class="btn" onclick="showMain()">取消</button>
-      <button class="btn btn-primary" onclick="saveConfig()">保存</button>
+      <button class="btn" id="btnCancel">取消</button>
+      <button class="btn btn-primary" id="btnSave">保存</button>
     </div>
     <div id="serverImport" style="margin-top:12px;display:none">
       <input id="serverUrl" placeholder="http://localhost:3457" style="width:100%;padding:6px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:11px">
-      <button class="btn btn-primary" style="margin-top:6px" onclick="doImport()">导入</button>
+      <button class="btn btn-primary" style="margin-top:6px" id="btnDoImport">导入</button>
     </div>
   </div>
 
   <div class="footer">
     <div class="actions">
-      <button class="btn btn-primary" onclick="refresh()">刷新</button>
-      <button class="btn" onclick="showSettings()">设置</button>
+      <button class="btn btn-primary" id="btnRefresh">刷新</button>
+      <button class="btn" id="btnSettings">设置</button>
     </div>
   </div>
 </div>
