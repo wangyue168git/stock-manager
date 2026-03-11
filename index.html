@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全球资产配置追踪器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(229, 231, 235, 1);
+        }
+        .flash-up { animation: flashUp .6s; }
+        .flash-down { animation: flashDown .6s; }
+        @keyframes flashUp { from { background: rgba(239,68,68,.12); } to { background: transparent; } }
+        @keyframes flashDown { from { background: rgba(16,185,129,.12); } to { background: transparent; } }
+        .conn-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+        .conn-dot.online { background: #10b981; animation: pulse 2s infinite; }
+        .conn-dot.offline { background: #ef4444; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-8 flex justify-between items-start">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">全球投资组合看板</h1>
+                <p class="text-slate-500">归集 A股 与 美股 持仓，实时计算风险敞口</p>
+            </div>
+            <div class="flex items-center gap-3 text-sm text-slate-400 mt-2">
+                <span class="conn-dot" id="connDot"></span>
+                <span id="connLabel">Connecting...</span>
+                <span id="updateTime"></span>
+            </div>
+        </header>
+
+        <!-- 概览卡片 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div class="glass-card p-6 rounded-2xl shadow-sm">
+                <p class="text-sm text-slate-500 mb-1">总资产 (估值 CNY)</p>
+                <h2 id="totalAssets" class="text-3xl font-bold text-indigo-600">¥ 0.00</h2>
+                <p class="text-xs text-slate-400 mt-1" id="totalUSD"></p>
+            </div>
+            <div class="glass-card p-6 rounded-2xl shadow-sm">
+                <p class="text-sm text-slate-500 mb-1">总盈亏</p>
+                <h2 id="totalPnl" class="text-3xl font-bold text-emerald-600">--</h2>
+                <p class="text-xs text-slate-400 mt-1" id="totalPnlPct"></p>
+            </div>
+            <div class="glass-card p-6 rounded-2xl shadow-sm">
+                <p class="text-sm text-slate-500 mb-1">今日涨跌</p>
+                <h2 id="todayChange" class="text-3xl font-bold text-orange-500">--</h2>
+                <p class="text-xs text-slate-400 mt-1" id="todayChangePct"></p>
+            </div>
+            <div class="glass-card p-6 rounded-2xl shadow-sm">
+                <p class="text-sm text-slate-500 mb-1">风险集中度 (最大持仓)</p>
+                <h2 id="topHolding" class="text-3xl font-bold text-orange-500">--</h2>
+                <p class="text-xs text-slate-400 mt-1" id="topHoldingPct"></p>
+            </div>
+        </div>
+
+        <!-- 收益曲线图 -->
+        <div class="glass-card p-6 rounded-2xl shadow-sm mb-8">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-slate-800">收益曲线</h3>
+                <div class="flex gap-2">
+                    <button onclick="setRange('1h')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="1h">1H</button>
+                    <button onclick="setRange('6h')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="6h">6H</button>
+                    <button onclick="setRange('1d')" class="range-btn text-xs px-3 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-600 transition" data-range="1d">1D</button>
+                    <button onclick="setRange('7d')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="7d">7D</button>
+                    <button onclick="setRange('all')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="all">ALL</button>
+                </div>
+            </div>
+            <canvas id="profitChart" height="100"></canvas>
+            <p class="text-xs text-slate-400 mt-2" id="chartInfo">数据记录中，曲线将随时间积累逐渐丰富</p>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- 持仓列表 -->
+            <div class="lg:col-span-2 space-y-6" id="accountsContainer"></div>
+
+            <!-- 图表分析 -->
+            <div class="space-y-6">
+                <div class="glass-card p-6 rounded-2xl shadow-sm">
+                    <h3 class="text-lg font-bold mb-4 text-slate-800">资产占比</h3>
+                    <canvas id="portfolioChart" width="280" height="280"></canvas>
+                </div>
+                <div class="glass-card p-6 rounded-2xl shadow-sm">
+                    <h3 class="text-lg font-bold mb-4 text-slate-800">市场分布</h3>
+                    <canvas id="marketChart" width="280" height="280"></canvas>
+                </div>
+                <div class="glass-card p-6 rounded-2xl shadow-sm">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-lg font-bold text-slate-800">实时汇率</h3>
+                        <span class="text-xs text-emerald-500 font-medium" id="rateStatus">自动更新</span>
+                    </div>
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="text-sm text-slate-500">USD/CNY</span>
+                        <span id="rateDisplay" class="text-lg font-bold text-slate-800">--</span>
+                    </div>
+                    <p class="text-xs text-slate-400">每小时自动刷新 · 来源 open.er-api.com</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 股票分析和操作指引 -->
+        <div class="mt-8 mb-8">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">📋 分析与操作指引</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="analysisContainer"></div>
+        </div>
+    </div>
+
+    <!-- 添加持仓弹窗 -->
+    <div id="addHoldingModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 w-[440px] max-w-[90vw] animate-[modalIn_.2s_ease]">
+            <h3 class="text-xl font-bold text-slate-800 mb-6">📈 添加持仓</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">账户</label>
+                    <select id="fAccount" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"></select>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">市场</label>
+                        <select id="fMarket" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                            <option value="sh">上海 (SH)</option>
+                            <option value="sz">深圳 (SZ)</option>
+                            <option value="nasdaq">纳斯达克</option>
+                            <option value="nyse">纽约</option>
+                            <option value="hk">香港</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">代码</label>
+                        <input id="fSymbol" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="600519 / TSLA">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">名称</label>
+                    <input id="fName" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="股票名称">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">持仓数量</label>
+                        <input id="fShares" type="number" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="100">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">成本价</label>
+                        <input id="fCost" type="number" step="0.01" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="150.00">
+                    </div>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeModals()" class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-lg text-sm hover:bg-slate-50 transition">取消</button>
+                <button onclick="submitHolding()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加账户弹窗 -->
+    <div id="addAccountModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 w-[400px] max-w-[90vw]">
+            <h3 class="text-xl font-bold text-slate-800 mb-6">🏦 添加账户</h3>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">账户名称</label>
+                    <input id="fAccName" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="如: A股-招商证券">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">币种</label>
+                    <select id="fAccCurrency" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        <option value="CNY">CNY (人民币)</option>
+                        <option value="USD">USD (美元)</option>
+                        <option value="HKD">HKD (港币)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeModals()" class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-lg text-sm hover:bg-slate-50 transition">取消</button>
+                <button onclick="submitAccount()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+let ws, portfolioData = null, prevPrices = {};
+let portfolioChart = null, marketChart = null, profitChart = null;
+let chartRange = '1d';
+
+// ---- WebSocket ----
+function connect() {
+    ws = new WebSocket(`ws://${location.host}`);
+    ws.onopen = () => {
+        document.getElementById('connDot').className = 'conn-dot online';
+        document.getElementById('connLabel').textContent = 'Live';
+    };
+    ws.onclose = () => {
+        document.getElementById('connDot').className = 'conn-dot offline';
+        document.getElementById('connLabel').textContent = 'Offline';
+        setTimeout(connect, 3000);
+    };
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'portfolio') {
+            portfolioData = msg.data;
+            render(msg.data);
+        }
+    };
+}
+
+// ---- Render ----
+function render(data) {
+    document.getElementById('updateTime').textContent = new Date(data.timestamp).toLocaleTimeString('zh-CN');
+
+    const rate = data.exchangeRate?.USD_CNY || 6.88;
+    document.getElementById('rateDisplay').textContent = rate;
+
+    let totalCNY = 0, totalCost = 0, todayChg = 0;
+    let allHoldings = [];
+    let marketTotals = {};
+
+    data.accounts.forEach(acc => {
+        const cur = acc.currency || 'CNY';
+        acc.holdings.forEach(h => {
+            const mv = h.marketValue || 0;
+            const cv = h.costValue || 0;
+            const dayChg = (h.change || 0) * h.shares;
+            let mvCNY, cvCNY, dayChgCNY;
+            if (cur === 'USD') {
+                mvCNY = mv * rate; cvCNY = cv * rate; dayChgCNY = dayChg * rate;
+            } else if (cur === 'HKD') {
+                const hkRate = rate / 7.8;
+                mvCNY = mv * hkRate; cvCNY = cv * hkRate; dayChgCNY = dayChg * hkRate;
+            } else {
+                mvCNY = mv; cvCNY = cv; dayChgCNY = dayChg;
+            }
+            totalCNY += mvCNY;
+            totalCost += cvCNY;
+            todayChg += dayChgCNY;
+            allHoldings.push({ name: h.name, valueCNY: mvCNY });
+
+            const mkt = h.market === 'sh' || h.market === 'sz' ? 'A股' : h.market === 'crypto' ? '币圈' : h.market === 'hk' ? '港股' : '美股';
+            marketTotals[mkt] = (marketTotals[mkt] || 0) + mvCNY;
+        });
+    });
+
+    const totalPnl = totalCNY - totalCost;
+    const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+    const todayPct = (totalCNY - todayChg) > 0 ? (todayChg / (totalCNY - todayChg)) * 100 : 0;
+
+    // Summary cards
+    document.getElementById('totalAssets').textContent = `¥ ${totalCNY.toLocaleString('zh-CN', {maximumFractionDigits: 0})}`;
+    document.getElementById('totalUSD').textContent = `≈ $${(totalCNY / rate).toLocaleString('en-US', {maximumFractionDigits: 0})} USD`;
+
+    const pnlEl = document.getElementById('totalPnl');
+    pnlEl.textContent = `${totalPnl >= 0 ? '+' : ''}¥${fmtW(totalPnl)}`;
+    pnlEl.className = `text-3xl font-bold ${totalPnl >= 0 ? 'text-red-500' : 'text-emerald-600'}`;
+    document.getElementById('totalPnlPct').textContent = `${totalPnlPct >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%`;
+
+    const chgEl = document.getElementById('todayChange');
+    chgEl.textContent = `${todayChg >= 0 ? '+' : ''}¥${fmtW(todayChg)}`;
+    chgEl.className = `text-3xl font-bold ${todayChg >= 0 ? 'text-red-500' : 'text-emerald-600'}`;
+    document.getElementById('todayChangePct').textContent = `${todayPct >= 0 ? '+' : ''}${todayPct.toFixed(2)}%`;
+
+    // Top holding
+    if (allHoldings.length > 0) {
+        allHoldings.sort((a, b) => b.valueCNY - a.valueCNY);
+        const top = allHoldings[0];
+        const topPct = totalCNY > 0 ? (top.valueCNY / totalCNY * 100) : 0;
+        document.getElementById('topHolding').textContent = top.name;
+        document.getElementById('topHoldingPct').textContent = `占比 ${topPct.toFixed(1)}%`;
+    }
+
+    // Render account tables
+    const container = document.getElementById('accountsContainer');
+    container.innerHTML = '';
+
+    // Action buttons
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'flex gap-3';
+    actionsDiv.innerHTML = `
+        <button onclick="showAddHolding()" class="bg-indigo-600 text-white px-5 py-2.5 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">+ 添加持仓</button>
+        <button onclick="showAddAccount()" class="border border-slate-200 text-slate-600 px-5 py-2.5 rounded-lg text-sm hover:bg-slate-100 transition">+ 添加账户</button>
+    `;
+    container.appendChild(actionsDiv);
+
+    data.accounts.forEach((acc, ai) => {
+        const cur = acc.currency || 'CNY';
+        const sym = cur === 'USD' ? '$' : cur === 'HKD' ? 'HK$' : '¥';
+        let accMV = 0, accCost = 0, accDayChg = 0;
+        acc.holdings.forEach(h => {
+            accMV += h.marketValue || 0;
+            accCost += h.costValue || 0;
+            accDayChg += (h.change || 0) * h.shares;
+        });
+        const accPnl = accMV - accCost;
+
+        const card = document.createElement('div');
+        card.className = 'glass-card rounded-2xl shadow-sm overflow-hidden';
+        let rowsHtml = '';
+
+        if (acc.holdings.length === 0) {
+            rowsHtml = `<tr><td colspan="7" class="py-8 text-center text-slate-400 text-sm">暂无持仓</td></tr>`;
+        } else {
+            acc.holdings.forEach((h, hi) => {
+                const cp = h.changePercent || 0;
+                const colorCls = cp > 0 ? 'text-red-500' : cp < 0 ? 'text-emerald-600' : 'text-slate-500';
+                const pnlCls = h.pnl >= 0 ? 'text-red-500' : 'text-emerald-600';
+                const arrow = cp > 0 ? '▲' : cp < 0 ? '▼' : '';
+                const mktLabel = h.market === 'sh' || h.market === 'sz' ? 'A股' : h.market === 'crypto' ? '币圈' : h.market === 'hk' ? '港股' : '美股';
+
+                // Flash detection
+                const key = `${ai}-${hi}`;
+                const prev = prevPrices[key];
+                let flashCls = '';
+                if (prev !== undefined && h.currentPrice !== prev) {
+                    flashCls = h.currentPrice > prev ? 'flash-up' : 'flash-down';
+                }
+                prevPrices[key] = h.currentPrice;
+
+                rowsHtml += `
+                <tr class="border-b last:border-0 hover:bg-slate-50/50 transition ${flashCls}">
+                    <td class="py-3.5 px-4">
+                        <div class="font-semibold text-slate-800">${esc(h.name)}</div>
+                        <div class="text-xs text-slate-400">${h.symbol} · ${mktLabel}</div>
+                    </td>
+                    <td class="py-3.5 px-4 font-mono text-sm ${colorCls}">${sym}${fmtN(h.currentPrice)}</td>
+                    <td class="py-3.5 px-4 text-sm text-slate-600">${h.shares}</td>
+                    <td class="py-3.5 px-4 text-sm text-slate-500 font-mono">${sym}${fmtN(h.costPrice)}</td>
+                    <td class="py-3.5 px-4 text-sm font-semibold ${colorCls}">${arrow} ${cp >= 0 ? '+' : ''}${cp.toFixed(2)}%</td>
+                    <td class="py-3.5 px-4 text-sm font-semibold ${pnlCls}">
+                        ${h.pnl >= 0 ? '+' : ''}${sym}${fmtW(h.pnl)}
+                        <span class="text-xs text-slate-400 ml-1">${h.pnlPercent >= 0 ? '+' : ''}${h.pnlPercent.toFixed(1)}%</span>
+                    </td>
+                    <td class="py-3.5 px-4 text-right">
+                        <span class="font-mono font-semibold text-slate-700">${sym}${fmtW(h.marketValue)}</span>
+                    </td>
+                    <td class="py-3.5 px-2 text-right">
+                        <button onclick="deleteHolding(${ai},${hi})" class="text-slate-300 hover:text-red-500 transition text-sm" title="删除">✕</button>
+                    </td>
+                </tr>`;
+            });
+
+            // Subtotal
+            const accPnlCls = accPnl >= 0 ? 'text-red-500' : 'text-emerald-600';
+            rowsHtml += `
+            <tr class="bg-slate-50/80">
+                <td class="py-3 px-4 font-semibold text-slate-500 text-sm" colspan="3">小计</td>
+                <td class="py-3 px-4 text-sm text-slate-400 font-mono">${sym}${fmtW(accCost)}</td>
+                <td class="py-3 px-4"></td>
+                <td class="py-3 px-4 text-sm font-semibold ${accPnlCls}">${accPnl >= 0 ? '+' : ''}${sym}${fmtW(accPnl)}</td>
+                <td class="py-3 px-4 text-right font-mono font-bold text-slate-800">${sym}${fmtW(accMV)}</td>
+                <td></td>
+            </tr>`;
+        }
+
+        const badgeColor = cur === 'USD' ? 'bg-blue-100 text-blue-600' : cur === 'HKD' ? 'bg-purple-100 text-purple-600' : 'bg-red-100 text-red-600';
+        card.innerHTML = `
+            <div class="flex justify-between items-center px-6 py-4 border-b border-slate-100">
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-bold text-slate-800">${esc(acc.name)}</h3>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-medium ${badgeColor}">${cur}</span>
+                </div>
+                <span class="text-sm text-slate-400">市值 ${sym}${fmtW(accMV)}</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="text-slate-400 text-xs uppercase tracking-wide border-b border-slate-100">
+                            <th class="py-3 px-4 font-medium">股票</th>
+                            <th class="py-3 px-4 font-medium">现价</th>
+                            <th class="py-3 px-4 font-medium">持仓</th>
+                            <th class="py-3 px-4 font-medium">成本</th>
+                            <th class="py-3 px-4 font-medium">涨跌</th>
+                            <th class="py-3 px-4 font-medium">盈亏</th>
+                            <th class="py-3 px-4 font-medium text-right">市值</th>
+                            <th class="py-3 px-2"></th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    // Charts
+    updateCharts(allHoldings, marketTotals);
+
+    // Profit curve
+    if (data.history) updateProfitChart(data.history);
+
+    // Analysis
+    renderAnalysis(data, rate, totalCNY);
+}
+
+// ---- Charts ----
+function updateCharts(holdings, marketTotals) {
+    const colors = ['#6366f1','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#f97316'];
+
+    // Portfolio chart
+    const ctx1 = document.getElementById('portfolioChart').getContext('2d');
+    if (portfolioChart) portfolioChart.destroy();
+    portfolioChart = new Chart(ctx1, {
+        type: 'doughnut',
+        data: {
+            labels: holdings.map(h => h.name),
+            datasets: [{ data: holdings.map(h => Math.max(0, h.valueCNY)), backgroundColor: colors, borderWidth: 0 }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12 } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => `${ctx.label}: ¥${fmtW(ctx.parsed)}`
+                    }
+                }
+            }
+        }
+    });
+
+    // Market chart
+    const ctx2 = document.getElementById('marketChart').getContext('2d');
+    if (marketChart) marketChart.destroy();
+    const mLabels = Object.keys(marketTotals);
+    const mData = Object.values(marketTotals);
+    const mColors = { 'A股': '#ef4444', '美股': '#6366f1', '港股': '#f59e0b', '币圈': '#8b5cf6' };
+    marketChart = new Chart(ctx2, {
+        type: 'doughnut',
+        data: {
+            labels: mLabels,
+            datasets: [{ data: mData, backgroundColor: mLabels.map(l => mColors[l] || '#94a3b8'), borderWidth: 0 }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom', labels: { font: { size: 11 }, padding: 12 } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                            return `${ctx.label}: ¥${fmtW(ctx.parsed)} (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// ---- Formatting ----
+function fmtN(v) {
+    if (v === undefined || v === null) return '--';
+    return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function fmtW(v) {
+    if (v === undefined || v === null) return '--';
+    if (Math.abs(v) >= 10000) return (v / 10000).toFixed(2) + '万';
+    return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ---- Modals ----
+function showAddHolding() {
+    const sel = document.getElementById('fAccount');
+    sel.innerHTML = '';
+    if (portfolioData) {
+        portfolioData.accounts.forEach((acc, i) => {
+            sel.innerHTML += `<option value="${i}">${esc(acc.name)}</option>`;
+        });
+    }
+    const modal = document.getElementById('addHoldingModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function showAddAccount() {
+    const modal = document.getElementById('addAccountModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeModals() {
+    document.querySelectorAll('#addHoldingModal,#addAccountModal').forEach(m => {
+        m.classList.add('hidden');
+        m.classList.remove('flex');
+    });
+}
+
+// Close on overlay click
+document.querySelectorAll('#addHoldingModal,#addAccountModal').forEach(m => {
+    m.addEventListener('click', (e) => { if (e.target === m) closeModals(); });
+});
+
+async function submitHolding() {
+    const data = {
+        accountIndex: parseInt(document.getElementById('fAccount').value),
+        holding: {
+            symbol: document.getElementById('fSymbol').value.trim().toUpperCase(),
+            market: document.getElementById('fMarket').value,
+            name: document.getElementById('fName').value.trim(),
+            shares: parseInt(document.getElementById('fShares').value) || 0,
+            costPrice: parseFloat(document.getElementById('fCost').value) || 0
+        }
+    };
+    if (!data.holding.symbol || !data.holding.name || !data.holding.shares) {
+        alert('请填写完整信息'); return;
+    }
+    await fetch('/api/holding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    closeModals();
+    ['fSymbol','fName','fShares','fCost'].forEach(id => document.getElementById(id).value = '');
+}
+
+async function submitAccount() {
+    const data = { name: document.getElementById('fAccName').value.trim(), currency: document.getElementById('fAccCurrency').value };
+    if (!data.name) { alert('请输入账户名称'); return; }
+    await fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    closeModals();
+    document.getElementById('fAccName').value = '';
+}
+
+async function deleteHolding(ai, hi) {
+    if (!confirm('确认删除此持仓？')) return;
+    await fetch(`/api/holding?account=${ai}&index=${hi}`, { method: 'DELETE' });
+}
+
+
+// ---- Profit Curve ----
+function setRange(r) {
+    chartRange = r;
+    document.querySelectorAll('.range-btn').forEach(b => {
+        const active = b.dataset.range === r;
+        b.className = `range-btn text-xs px-3 py-1 rounded-full border transition ${active ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'}`;
+    });
+    if (portfolioData && portfolioData.history) updateProfitChart(portfolioData.history);
+}
+
+function updateProfitChart(snapshots) {
+    if (!snapshots || !snapshots.length) return;
+
+    const now = Date.now();
+    const ranges = { '1h': 3600000, '6h': 21600000, '1d': 86400000, '7d': 604800000, 'all': Infinity };
+    const cutoff = now - (ranges[chartRange] || 86400000);
+    let filtered = chartRange === 'all' ? snapshots : snapshots.filter(s => new Date(s.t).getTime() > cutoff);
+    if (filtered.length === 0) filtered = snapshots.slice(-10);
+
+    // Downsample if too many points
+    if (filtered.length > 200) {
+        const step = Math.ceil(filtered.length / 200);
+        filtered = filtered.filter((_, i) => i % step === 0 || i === filtered.length - 1);
+    }
+
+    const labels = filtered.map(s => {
+        const d = new Date(s.t);
+        if (chartRange === '7d' || chartRange === 'all') return d.toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'}) + ' ' + d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+        return d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
+    });
+    const values = filtered.map(s => s.v);
+    const costs = filtered.map(s => s.c);
+    const pnls = filtered.map(s => Math.round((s.v - s.c) * 100) / 100);
+
+    const isUp = pnls.length > 1 && pnls[pnls.length - 1] >= pnls[0];
+
+    const ctx = document.getElementById('profitChart').getContext('2d');
+    if (profitChart) profitChart.destroy();
+    profitChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: '总市值 (CNY)',
+                    data: values,
+                    borderColor: '#6366f1',
+                    backgroundColor: 'rgba(99,102,241,0.08)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                },
+                {
+                    label: '总成本',
+                    data: costs,
+                    borderColor: '#94a3b8',
+                    borderDash: [4, 4],
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                },
+                {
+                    label: '浮动盈亏',
+                    data: pnls,
+                    borderColor: isUp ? '#ef4444' : '#10b981',
+                    backgroundColor: isUp ? 'rgba(239,68,68,0.06)' : 'rgba(16,185,129,0.06)',
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 2,
+                    yAxisID: 'y1',
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => `${ctx.dataset.label}: ¥${fmtW(ctx.parsed.y)}`
+                    }
+                }
+            },
+            scales: {
+                x: { display: true, grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', maxTicksLimit: 8 } },
+                y: { display: true, position: 'left', grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, color: '#94a3b8', callback: v => '¥' + fmtW(v) } },
+                y1: { display: true, position: 'right', grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', callback: v => '¥' + fmtW(v) } }
+            }
+        }
+    });
+
+    document.getElementById('chartInfo').textContent = `共 ${snapshots.length} 个数据点 · 当前显示 ${filtered.length} 个 · 每分钟记录一次`;
+}
+
+// ---- Analysis Engine ----
+function renderAnalysis(data, rate, totalCNY) {
+    const container = document.getElementById('analysisContainer');
+    const cards = [];
+
+    data.accounts.forEach(acc => {
+        const cur = acc.currency || 'CNY';
+        const sym = cur === 'USD' ? '$' : cur === 'HKD' ? 'HK$' : '¥';
+        const mul = cur === 'USD' ? rate : cur === 'HKD' ? rate / 7.8 : 1;
+
+        acc.holdings.forEach(h => {
+            if (!h.currentPrice) return;
+            const pnlPct = h.pnlPercent || 0;
+            const cp = h.changePercent || 0;
+            const posPct = totalCNY > 0 ? ((h.marketValue || 0) * mul / totalCNY * 100) : 0;
+
+            let signals = [];
+            let level = 'neutral'; // neutral, warning, danger, success
+
+            // P&L analysis
+            if (pnlPct <= -20) {
+                signals.push({ icon: '🔴', text: `深度亏损 ${pnlPct.toFixed(1)}%，可考虑定投摊薄成本或止损` });
+                level = 'danger';
+            } else if (pnlPct <= -10) {
+                signals.push({ icon: '🟠', text: `亏损 ${pnlPct.toFixed(1)}%，关注支撑位，考虑是否补仓` });
+                level = 'warning';
+            } else if (pnlPct >= 50) {
+                signals.push({ icon: '🟢', text: `盈利丰厚 +${pnlPct.toFixed(1)}%，建议部分止盈锁定利润` });
+                level = 'success';
+            } else if (pnlPct >= 20) {
+                signals.push({ icon: '🟢', text: `盈利 +${pnlPct.toFixed(1)}%，可设置移动止盈保护利润` });
+                level = 'success';
+            } else if (pnlPct > 0) {
+                signals.push({ icon: '🔵', text: `小幅盈利 +${pnlPct.toFixed(1)}%，持有观察` });
+            } else {
+                signals.push({ icon: '🔵', text: `微亏 ${pnlPct.toFixed(1)}%，正常波动范围` });
+            }
+
+            // Position concentration
+            if (posPct > 30) {
+                signals.push({ icon: '⚠️', text: `仓位占比 ${posPct.toFixed(1)}%，集中度过高，建议分散` });
+                if (level === 'neutral') level = 'warning';
+            } else if (posPct > 20) {
+                signals.push({ icon: '📊', text: `仓位占比 ${posPct.toFixed(1)}%，属于重仓，注意风控` });
+            }
+
+            // Today's movement
+            if (cp >= 5) {
+                signals.push({ icon: '📈', text: `今日大涨 +${cp.toFixed(2)}%，注意追高风险` });
+            } else if (cp >= 3) {
+                signals.push({ icon: '📈', text: `今日强势 +${cp.toFixed(2)}%` });
+            } else if (cp <= -5) {
+                signals.push({ icon: '📉', text: `今日大跌 ${cp.toFixed(2)}%，恐慌不宜追空，可关注机会` });
+            } else if (cp <= -3) {
+                signals.push({ icon: '📉', text: `今日下跌 ${cp.toFixed(2)}%，观察是否企稳` });
+            }
+
+            // Price vs high/low
+            if (h.high && h.low && h.currentPrice) {
+                const range = h.high - h.low;
+                if (range > 0) {
+                    const pos = (h.currentPrice - h.low) / range;
+                    if (pos > 0.9) signals.push({ icon: '🔺', text: `接近日内高点，短线注意回调压力` });
+                    else if (pos < 0.1) signals.push({ icon: '🔻', text: `接近日内低点，关注支撑` });
+                }
+            }
+
+            // MA signals from tech data
+            const tech = h.tech;
+            if (tech) {
+                const maList = [];
+                if (tech.ma5) maList.push({name:'MA5', v:tech.ma5});
+                if (tech.ma10) maList.push({name:'MA10', v:tech.ma10});
+                if (tech.ma20) maList.push({name:'MA20', v:tech.ma20});
+                if (tech.ma60) maList.push({name:'MA60', v:tech.ma60});
+                const above = maList.filter(m => h.currentPrice > m.v).map(m => m.name);
+                const below = maList.filter(m => h.currentPrice < m.v).map(m => m.name);
+                if (below.length > 0 && above.length > 0) {
+                    signals.push({ icon: '📐', text: `均线位置：站上 ${above.join('/')}，下方 ${below.join('/')}` });
+                } else if (below.length === 0 && maList.length > 0) {
+                    signals.push({ icon: '📐', text: `多头排列：站上全部均线 (${maList.map(m=>m.name).join('/')})` });
+                } else if (above.length === 0 && maList.length > 0) {
+                    signals.push({ icon: '📐', text: `空头排列：跌破全部均线，弱势` });
+                }
+            }
+
+            // Operation suggestion
+            let action = '持有观察';
+            let actionColor = 'text-slate-600 bg-slate-50';
+            if (pnlPct <= -20 && cp <= -2) { action = '考虑定投补仓'; actionColor = 'text-orange-600 bg-orange-50'; }
+            else if (pnlPct <= -20) { action = '设止损 / 定投'; actionColor = 'text-orange-600 bg-orange-50'; }
+            else if (pnlPct >= 50) { action = '建议部分止盈'; actionColor = 'text-emerald-600 bg-emerald-50'; }
+            else if (pnlPct >= 20 && cp >= 3) { action = '可止盈部分仓位'; actionColor = 'text-emerald-600 bg-emerald-50'; }
+            else if (cp <= -5 && pnlPct > -10) { action = '关注抄底机会'; actionColor = 'text-blue-600 bg-blue-50'; }
+
+            const borderColor = level === 'danger' ? 'border-l-red-400' : level === 'warning' ? 'border-l-orange-400' : level === 'success' ? 'border-l-emerald-400' : 'border-l-slate-200';
+            const pnlColor = pnlPct >= 0 ? 'text-red-500' : 'text-emerald-600';
+            const cpColor = cp >= 0 ? 'text-red-500' : 'text-emerald-600';
+
+            // Build support/resistance/entry HTML
+            let techHtml = '';
+            if (tech) {
+                // Support levels
+                if (tech.supports && tech.supports.length > 0) {
+                    techHtml += `<div class="mt-3 pt-3 border-t border-slate-100">
+                        <div class="text-xs font-semibold text-emerald-600 mb-1.5">📍 支撑位</div>
+                        <div class="flex flex-wrap gap-1.5">${tech.supports.map((s,i) => `<span class="text-xs font-mono px-2 py-0.5 rounded ${i===0?'bg-emerald-100 text-emerald-700 font-semibold':'bg-slate-100 text-slate-600'}">${sym}${fmtN(s)}</span>`).join('')}</div>
+                    </div>`;
+                }
+                // Resistance levels
+                if (tech.resistances && tech.resistances.length > 0) {
+                    techHtml += `<div class="mt-2">
+                        <div class="text-xs font-semibold text-red-500 mb-1.5">📍 压力位</div>
+                        <div class="flex flex-wrap gap-1.5">${tech.resistances.map((r,i) => `<span class="text-xs font-mono px-2 py-0.5 rounded ${i===0?'bg-red-50 text-red-600 font-semibold':'bg-slate-100 text-slate-600'}">${sym}${fmtN(r)}</span>`).join('')}</div>
+                    </div>`;
+                }
+                // Recommended entry / add position
+                if (tech.entries && tech.entries.length > 0) {
+                    techHtml += `<div class="mt-2">
+                        <div class="text-xs font-semibold text-indigo-600 mb-1.5">🎯 建议加仓位</div>
+                        <div class="space-y-1">${tech.entries.map((e,i) => {
+                            const dropPct = ((e.price - h.currentPrice) / h.currentPrice * 100).toFixed(1);
+                            return `<div class="flex items-center justify-between text-xs">
+                                <span class="font-mono font-semibold ${i===0?'text-indigo-700':'text-slate-600'}">${sym}${fmtN(e.price)}</span>
+                                <span class="text-slate-400">${e.reason}</span>
+                                <span class="text-slate-400">${dropPct}%</span>
+                            </div>`;
+                        }).join('')}</div>
+                    </div>`;
+                }
+                // Price range context
+                if (tech.high60 && tech.low60) {
+                    const rangePos = ((h.currentPrice - tech.low60) / (tech.high60 - tech.low60) * 100).toFixed(0);
+                    techHtml += `<div class="mt-2">
+                        <div class="text-xs text-slate-400 mb-1">60日区间 ${sym}${fmtN(tech.low60)} — ${sym}${fmtN(tech.high60)}</div>
+                        <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div class="h-full rounded-full ${rangePos > 70 ? 'bg-red-400' : rangePos < 30 ? 'bg-emerald-400' : 'bg-indigo-400'}" style="width:${Math.max(2,Math.min(100,rangePos))}%"></div>
+                        </div>
+                    </div>`;
+                }
+            }
+
+            cards.push(`
+            <div class="glass-card rounded-xl p-5 border-l-4 ${borderColor}">
+                <div class="flex justify-between items-start mb-3">
+                    <div>
+                        <span class="font-bold text-slate-800">${esc(h.name)}</span>
+                        <span class="text-xs text-slate-400 ml-1">${h.symbol}</span>
+                    </div>
+                    <span class="text-xs px-2.5 py-1 rounded-full font-medium ${actionColor}">${action}</span>
+                </div>
+                <div class="flex gap-4 text-sm mb-3">
+                    <span class="text-slate-500">现价 <span class="font-mono font-semibold ${cpColor}">${sym}${fmtN(h.currentPrice)}</span></span>
+                    <span class="text-slate-500">盈亏 <span class="font-semibold ${pnlColor}">${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%</span></span>
+                    <span class="text-slate-500">仓位 <span class="font-semibold">${posPct.toFixed(1)}%</span></span>
+                </div>
+                <div class="space-y-1.5">
+                    ${signals.map(s => `<div class="text-xs text-slate-600">${s.icon} ${s.text}</div>`).join('')}
+                </div>
+                ${techHtml}
+            </div>`);
+        });
+    });
+
+    container.innerHTML = cards.join('');
+}
+
+// ---- Init ----
+connect();
+</script>
+</body>
+</html>
