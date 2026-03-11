@@ -138,14 +138,117 @@ function fetchCryptoPrices(symbols) {
   });
 }
 
-// Fetch stock prices from East Money API (supports A-shares + US + HK)
+// Convert holding to Sina API symbol format
+function toSinaSymbol(h) {
+  const isUS = (m) => m === "nasdaq" || m === "nyse";
+  if (h.market === "sh") return `sh${h.symbol}`;
+  if (h.market === "sz") return `sz${h.symbol}`;
+  if (h.market === "hk") return `hk${h.symbol}`;
+  if (isUS(h.market)) return `gb_${h.symbol.toLowerCase()}`;
+  return null;
+}
+
+// Fetch stock prices from Sina Finance API (works globally)
 function fetchStockPrices(holdings) {
+  if (!holdings.length) return Promise.resolve({});
+  const symbolMap = {};
+  const sinaSymbols = [];
+  holdings.forEach((h) => {
+    const ss = toSinaSymbol(h);
+    if (ss) {
+      sinaSymbols.push(ss);
+      symbolMap[ss] = h;
+    }
+  });
+  const url = `https://hq.sinajs.cn/list=${sinaSymbols.join(",")}`;
+
+  return new Promise((resolve, reject) => {
+    https
+      .get(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+          Referer: "https://finance.sina.com.cn",
+        },
+      }, (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          try {
+            const prices = {};
+            const lines = data.split("\n").filter((l) => l.trim());
+            lines.forEach((line) => {
+              const match = line.match(/var hq_str_(\w+)="(.*)"/);
+              if (!match || !match[2]) return;
+              const sinaKey = match[1];
+              const parts = match[2].split(",");
+              const h = symbolMap[sinaKey];
+              if (!h) return;
+
+              const isUS = h.market === "nasdaq" || h.market === "nyse";
+              const isHK = h.market === "hk";
+              let price, open, high, low, prevClose, name;
+
+              if (isUS) {
+                // US stock: name,price,change,changePercent,timestamp,...
+                name = parts[0] || h.symbol;
+                price = parseFloat(parts[1]) || 0;
+                const change = parseFloat(parts[2]) || 0;
+                const changePct = parseFloat(parts[3]) || 0;
+                prevClose = price - change;
+                high = parseFloat(parts[6]) || price;
+                low = parseFloat(parts[7]) || price;
+                open = parseFloat(parts[5]) || price;
+                const secid = `${isUS ? "105" : MARKET_MAP[h.market]}.${h.symbol}`;
+                // Store with resolved secid for US stocks
+                if (h.market === "nasdaq") {
+                  resolvedSecids[h.symbol] = `105.${h.symbol}`;
+                } else if (h.market === "nyse") {
+                  resolvedSecids[h.symbol] = `106.${h.symbol}`;
+                }
+                prices[resolvedSecids[h.symbol] || secid] = {
+                  price, changePercent: changePct, change, name,
+                  high, low, open, prevClose,
+                };
+              } else {
+                // A-share: name,open,prevClose,price,high,low,...
+                name = parts[0] || h.symbol;
+                open = parseFloat(parts[1]) || 0;
+                prevClose = parseFloat(parts[2]) || 0;
+                price = parseFloat(parts[3]) || 0;
+                high = parseFloat(parts[4]) || 0;
+                low = parseFloat(parts[5]) || 0;
+                const change = price - prevClose;
+                const changePct = prevClose ? ((change / prevClose) * 100) : 0;
+                const secid = `${MARKET_MAP[h.market]}.${h.symbol}`;
+                prices[secid] = {
+                  price, changePercent: parseFloat(changePct.toFixed(2)),
+                  change: parseFloat(change.toFixed(4)), name,
+                  high, low, open, prevClose,
+                };
+              }
+            });
+            resolve(prices);
+          } catch (e) {
+            console.error("Sina API parse error:", e.message);
+            // Fallback to East Money API
+            fetchStockPricesEastMoney(holdings).then(resolve).catch(reject);
+          }
+        });
+      })
+      .on("error", (e) => {
+        console.error("Sina API error:", e.message);
+        fetchStockPricesEastMoney(holdings).then(resolve).catch(reject);
+      });
+  });
+}
+
+// Fallback: East Money API (may not work from overseas)
+function fetchStockPricesEastMoney(holdings) {
   if (!holdings.length) return Promise.resolve({});
   const isUS = (m) => m === "nasdaq" || m === "nyse";
   const secidList = [];
   holdings.forEach((h) => {
     if (isUS(h.market)) {
-      // Try all US exchange prefixes to auto-detect
       US_PREFIXES.forEach((p) => secidList.push(`${p}.${h.symbol}`));
     } else {
       secidList.push(`${MARKET_MAP[h.market]}.${h.symbol}`);
@@ -184,11 +287,11 @@ function fetchStockPrices(holdings) {
             }
             resolve(prices);
           } catch (e) {
-            reject(e);
+            resolve({});
           }
         });
       })
-      .on("error", reject);
+      .on("error", () => resolve({}));
   });
 }
 
@@ -313,10 +416,19 @@ const KLINE_INTERVAL = 10 * 60 * 1000; // refresh every 10 min
 const resolvedSecids = {}; // cache correct secid for US stocks
 
 function fetchKline(secid) {
+  // Try East Money first, fallback to empty (K-line is best-effort)
+  return fetchKlineEastMoney(secid).then((klines) => {
+    if (klines.length > 0) return klines;
+    return [];
+  });
+}
+
+function fetchKlineEastMoney(secid) {
   return new Promise((resolve) => {
     const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57&klt=101&fqt=1&end=20500101&lmt=120`;
     https.get(url, {
       headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)", Referer: "https://www.eastmoney.com" },
+      timeout: 8000,
     }, (res) => {
       let data = "";
       res.on("data", (c) => (data += c));

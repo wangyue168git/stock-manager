@@ -190,7 +190,8 @@ let chartRange = '1d';
 
 // ---- WebSocket ----
 function connect() {
-    ws = new WebSocket(`ws://${location.host}`);
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${wsProto}://${location.host}`);
     ws.onopen = () => {
         document.getElementById('connDot').className = 'conn-dot online';
         document.getElementById('connLabel').textContent = 'Live';
