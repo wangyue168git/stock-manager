@@ -237,6 +237,7 @@
 let ws, portfolioData = null, prevPrices = {};
 let portfolioChart = null, marketChart = null, profitChart = null;
 let chartRange = '1d';
+let lastChartHash = '', lastProfitLen = 0;
 let maskMode = localStorage.getItem('maskMode') === '1';
 
 function toggleMask() {
@@ -452,11 +453,18 @@ function render(data) {
         container.appendChild(card);
     });
 
-    // Charts
-    updateCharts(allHoldings, marketTotals);
+    // Charts - only rebuild if holdings changed
+    const chartHash = allHoldings.map(h => h.name + ':' + Math.round(h.valueCNY)).join('|');
+    if (chartHash !== lastChartHash) {
+        lastChartHash = chartHash;
+        updateCharts(allHoldings, marketTotals);
+    }
 
-    // Profit curve
-    if (data.history) updateProfitChart(data.history);
+    // Profit curve - only rebuild if new data points added
+    if (data.history && data.history.length !== lastProfitLen) {
+        lastProfitLen = data.history.length;
+        updateProfitChart(data.history);
+    }
 
     // Analysis
     renderAnalysis(data, rate, totalCNY);
@@ -609,6 +617,7 @@ async function deleteHolding(ai, hi) {
 // ---- Profit Curve ----
 function setRange(r) {
     chartRange = r;
+    lastProfitLen = 0; // force chart rebuild
     document.querySelectorAll('.range-btn').forEach(b => {
         const active = b.dataset.range === r;
         b.className = `range-btn text-xs px-3 py-1 rounded-full border transition ${active ? 'border-indigo-200 bg-indigo-50 text-indigo-600' : 'border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200'}`;
@@ -642,62 +651,57 @@ function updateProfitChart(snapshots) {
     // Benchmark comparison mode: show % returns
     if (showBenchmark && portfolioData && portfolioData.benchmarks) {
         const bmColors = { '沪深300': '#ef4444', '纳斯达克': '#10b981', '标普500': '#f59e0b' };
-        // Use benchmark date axis as the primary timeline
-        // Find the longest benchmark to use as base timeline
         let baseDates = [];
         for (const bmData of Object.values(portfolioData.benchmarks)) {
             if (bmData && bmData.length > baseDates.length) baseDates = bmData.map(d => d.date);
         }
-        if (baseDates.length < 2) { /* fallback to normal mode below */ }
-        else {
+        if (baseDates.length >= 2) {
+            // Build benchmark date->index lookup for fast access
+            const dateIdx = {}; baseDates.forEach((d, i) => dateIdx[d] = i);
             const bmLabels = baseDates.map(d => { const [y,m,dd] = d.split('-'); return `${parseInt(m)}/${parseInt(dd)}`; });
 
-            // Portfolio returns: group history by day, align to benchmark dates
+            // Portfolio: group history by day, use costValue as base for total return
             const portfolioByDay = {};
-            snapshots.forEach(s => { portfolioByDay[s.t.slice(0, 10)] = s.v; });
+            snapshots.forEach(s => { portfolioByDay[s.t.slice(0, 10)] = s; });
             const portfolioDays = Object.keys(portfolioByDay).sort();
-            let portfolioBase = portfolioDays.length > 0 ? portfolioByDay[portfolioDays[0]] : 0;
-            // Find the benchmark start date that aligns with portfolio start
-            let pfStartIdx = portfolioDays.length > 0 ? baseDates.indexOf(portfolioDays[0]) : -1;
-            // If portfolio started after benchmark, use portfolio start as base for benchmark too
-            const commonStartIdx = pfStartIdx >= 0 ? pfStartIdx : 0;
 
             const datasets = [];
 
-            // Benchmark datasets - all start from commonStartIdx normalized to 0%
+            // Benchmark datasets - all normalized from first date = 0%
             for (const [bmName, bmData] of Object.entries(portfolioData.benchmarks)) {
                 if (!bmData || bmData.length < 2) continue;
-                const bmBase = bmData[commonStartIdx] ? bmData[commonStartIdx].close : bmData[0].close;
+                const bmMap = {}; bmData.forEach(d => bmMap[d.date] = d.close);
+                const bmBase = bmData[0].close;
                 if (bmBase <= 0) continue;
-                const bmReturns = baseDates.map((date, i) => {
-                    const pt = bmData.find(d => d.date === date);
-                    return pt ? Math.round((pt.close - bmBase) / bmBase * 10000) / 100 : null;
-                });
+                const bmReturns = baseDates.map(date => bmMap[date] !== undefined ? Math.round((bmMap[date] - bmBase) / bmBase * 10000) / 100 : null);
                 datasets.push({
-                    label: bmName,
-                    data: bmReturns,
+                    label: bmName, data: bmReturns,
                     borderColor: bmColors[bmName] || '#94a3b8',
-                    fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2,
-                    spanGaps: true,
+                    fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2, spanGaps: true,
                 });
             }
 
-            // Portfolio dataset - align to benchmark date axis
-            if (portfolioDays.length > 0 && portfolioBase > 0) {
-                let lastPfReturn = null;
-                const pfReturns = baseDates.map(date => {
-                    if (portfolioByDay[date] !== undefined) {
-                        lastPfReturn = Math.round((portfolioByDay[date] - portfolioBase) / portfolioBase * 10000) / 100;
+            // Portfolio dataset using cost-based P&L return, shown as a line from first available day
+            if (portfolioDays.length > 0) {
+                const pfReturns = new Array(baseDates.length).fill(null);
+                const firstSnap = portfolioByDay[portfolioDays[0]];
+                const pfBase = firstSnap.c > 0 ? firstSnap.c : firstSnap.v; // cost or value as base
+                portfolioDays.forEach(day => {
+                    const idx = dateIdx[day];
+                    if (idx !== undefined && pfBase > 0) {
+                        pfReturns[idx] = Math.round((portfolioByDay[day].v - pfBase) / pfBase * 10000) / 100;
                     }
-                    return lastPfReturn;
                 });
+                // Fill forward from first valid point so the line is visible
+                let last = null;
+                for (let i = 0; i < pfReturns.length; i++) {
+                    if (pfReturns[i] !== null) last = pfReturns[i];
+                    else if (last !== null) pfReturns[i] = last;
+                }
                 datasets.unshift({
-                    label: '我的组合',
-                    data: pfReturns,
-                    borderColor: '#6366f1',
-                    backgroundColor: 'rgba(99,102,241,0.08)',
-                    fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
-                    spanGaps: true,
+                    label: '我的组合', data: pfReturns,
+                    borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)',
+                    fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5, spanGaps: true,
                 });
             }
 
@@ -705,8 +709,7 @@ function updateProfitChart(snapshots) {
                 type: 'line',
                 data: { labels: bmLabels, datasets },
                 options: {
-                    responsive: true,
-                    interaction: { mode: 'index', intersect: false },
+                    responsive: true, interaction: { mode: 'index', intersect: false },
                     plugins: {
                         legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
                         tooltip: { callbacks: { label: (c) => c.parsed.y !== null ? `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}%` : '' } }
@@ -717,7 +720,8 @@ function updateProfitChart(snapshots) {
                     }
                 }
             });
-            document.getElementById('chartInfo').textContent = `基准对比模式 · 近 ${baseDates.length} 个交易日收益率% · 我的组合数据将随时间积累`;
+            const pfDayCount = portfolioDays.length;
+            document.getElementById('chartInfo').textContent = `基准对比模式 · 近 ${baseDates.length} 个交易日 · 我的组合已记录 ${pfDayCount} 天`;
             return;
         }
     }
@@ -1027,6 +1031,7 @@ function renderNews(newsData, fullData) {
 let showBenchmark = false;
 function toggleBenchmark() {
     showBenchmark = document.getElementById('showBenchmark').checked;
+    lastProfitLen = 0; // force chart rebuild
     if (portfolioData && portfolioData.history) updateProfitChart(portfolioData.history);
 }
 
