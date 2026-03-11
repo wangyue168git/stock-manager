@@ -103,22 +103,23 @@ function recordSnapshot(totalCNY, totalCost) {
   saveHistoryFile(history);
 }
 
-// Fetch crypto prices - try Coinbase first, then Binance as fallback
+// Fetch crypto prices - try CryptoCompare first, then Coinbase, then Binance
 function fetchCryptoPrices(symbols) {
   if (!symbols.length) return Promise.resolve({});
   return new Promise((resolve) => {
     const results = {};
     let done = 0;
     symbols.forEach((sym) => {
-      const cbUrl = `https://api.coinbase.com/v2/prices/${sym}-USD/spot`;
-      https.get(cbUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+      // Primary: CryptoCompare (works globally)
+      const ccUrl = `https://min-api.cryptocompare.com/data/price?fsym=${sym}&tsyms=USD`;
+      https.get(ccUrl, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }, (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
         res.on("end", () => {
           try {
             const j = JSON.parse(data);
-            if (j.data && j.data.amount) {
-              const price = parseFloat(j.data.amount);
+            if (j.USD) {
+              const price = parseFloat(j.USD);
               results[`crypto.${sym}`] = {
                 price, changePercent: 0, change: 0,
                 high: price, low: price, open: price, prevClose: price,
@@ -129,19 +130,44 @@ function fetchCryptoPrices(symbols) {
             }
             throw new Error("no data");
           } catch (e) {
-            // Fallback to Binance
-            fetchCryptoBinance(sym, results, () => {
+            // Fallback to Coinbase
+            fetchCryptoCoinbase(sym, results, () => {
               if (++done === symbols.length) resolve(results);
             });
           }
         });
       }).on("error", () => {
-        fetchCryptoBinance(sym, results, () => {
+        fetchCryptoCoinbase(sym, results, () => {
           if (++done === symbols.length) resolve(results);
         });
       });
     });
   });
+}
+
+function fetchCryptoCoinbase(sym, results, cb) {
+  const url = `https://api.coinbase.com/v2/prices/${sym}-USD/spot`;
+  https.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 5000 }, (res) => {
+    let data = "";
+    res.on("data", (c) => (data += c));
+    res.on("end", () => {
+      try {
+        const j = JSON.parse(data);
+        if (j.data && j.data.amount) {
+          const price = parseFloat(j.data.amount);
+          results[`crypto.${sym}`] = {
+            price, changePercent: 0, change: 0,
+            high: price, low: price, open: price, prevClose: price, name: sym,
+          };
+          cb();
+          return;
+        }
+        throw new Error("no data");
+      } catch (e) {
+        fetchCryptoBinance(sym, results, cb);
+      }
+    });
+  }).on("error", () => fetchCryptoBinance(sym, results, cb));
 }
 
 function fetchCryptoBinance(sym, results, cb) {
