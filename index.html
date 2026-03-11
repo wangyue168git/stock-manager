@@ -65,7 +65,10 @@
         <!-- 收益曲线图 -->
         <div class="glass-card p-6 rounded-2xl shadow-sm mb-8">
             <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-bold text-slate-800">收益曲线</h3>
+                <div class="flex items-center gap-3">
+                    <h3 class="text-lg font-bold text-slate-800">收益曲线</h3>
+                    <label class="flex items-center gap-1 text-xs text-slate-500 cursor-pointer"><input type="checkbox" id="showBenchmark" onchange="toggleBenchmark()" class="accent-indigo-500"> 基准对比</label>
+                </div>
                 <div class="flex gap-2">
                     <button onclick="setRange('1h')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="1h">1H</button>
                     <button onclick="setRange('6h')" class="range-btn text-xs px-3 py-1 rounded-full border border-slate-200 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition" data-range="6h">6H</button>
@@ -78,6 +81,36 @@
             <p class="text-xs text-slate-400 mt-2" id="chartInfo">数据记录中，曲线将随时间积累逐渐丰富</p>
         </div>
 
+        <!-- 风控指标面板 -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8" id="riskPanel">
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">最大回撤</p>
+                <p id="riskMDD" class="text-xl font-bold text-red-500">--</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">年化波动率</p>
+                <p id="riskVol" class="text-xl font-bold text-orange-500">--</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">夏普比率</p>
+                <p id="riskSharpe" class="text-xl font-bold text-indigo-600">--</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">年化收益</p>
+                <p id="riskAnnual" class="text-xl font-bold text-emerald-600">--</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">累计收益</p>
+                <p id="riskTotal" class="text-xl font-bold text-blue-600">--</p>
+            </div>
+            <div class="glass-card p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400 mb-1">Beta系数</p>
+                <p id="riskBeta" class="text-xl font-bold text-purple-600">--</p>
+                <p id="riskBetaLabel" class="text-xs text-slate-400"></p>
+            </div>
+        </div>
+
+        <!-- 相关性矩阵 + 持仓 -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <!-- 持仓列表 -->
             <div class="lg:col-span-2 space-y-6" id="accountsContainer"></div>
@@ -91,6 +124,13 @@
                 <div class="glass-card p-6 rounded-2xl shadow-sm">
                     <h3 class="text-lg font-bold mb-4 text-slate-800">市场分布</h3>
                     <canvas id="marketChart" width="280" height="280"></canvas>
+                </div>
+                <!-- 相关性矩阵 -->
+                <div class="glass-card p-6 rounded-2xl shadow-sm">
+                    <h3 class="text-lg font-bold mb-3 text-slate-800">相关性矩阵</h3>
+                    <div id="correlationMatrix" class="overflow-x-auto text-xs">
+                        <p class="text-slate-400 text-xs">数据加载中...</p>
+                    </div>
                 </div>
                 <div class="glass-card p-6 rounded-2xl shadow-sm">
                     <div class="flex justify-between items-center mb-3">
@@ -110,6 +150,14 @@
         <div class="mt-8 mb-8">
             <h3 class="text-xl font-bold text-slate-800 mb-4">📋 分析与操作指引</h3>
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="analysisContainer"></div>
+        </div>
+
+        <!-- 新闻聚合 -->
+        <div class="mb-8">
+            <h3 class="text-xl font-bold text-slate-800 mb-4">📰 持仓新闻</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="newsContainer">
+                <p class="text-slate-400 text-sm">新闻加载中...</p>
+            </div>
         </div>
     </div>
 
@@ -412,6 +460,15 @@ function render(data) {
 
     // Analysis
     renderAnalysis(data, rate, totalCNY);
+
+    // Risk metrics
+    if (data.riskMetrics) renderRiskMetrics(data.riskMetrics);
+
+    // Correlation matrix
+    if (data.correlation) renderCorrelation(data.correlation);
+
+    // News
+    if (data.news) renderNews(data.news, data);
 }
 
 // ---- Charts ----
@@ -568,7 +625,6 @@ function updateProfitChart(snapshots) {
     let filtered = chartRange === 'all' ? snapshots : snapshots.filter(s => new Date(s.t).getTime() > cutoff);
     if (filtered.length === 0) filtered = snapshots.slice(-10);
 
-    // Downsample if too many points
     if (filtered.length > 200) {
         const step = Math.ceil(filtered.length / 200);
         filtered = filtered.filter((_, i) => i % step === 0 || i === filtered.length - 1);
@@ -579,50 +635,84 @@ function updateProfitChart(snapshots) {
         if (chartRange === '7d' || chartRange === 'all') return d.toLocaleDateString('zh-CN', {month:'numeric', day:'numeric'}) + ' ' + d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
         return d.toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'});
     });
-    const values = filtered.map(s => s.v);
-    const costs = filtered.map(s => s.c);
-    const pnls = filtered.map(s => Math.round((s.v - s.c) * 100) / 100);
-
-    const isUp = pnls.length > 1 && pnls[pnls.length - 1] >= pnls[0];
 
     const ctx = document.getElementById('profitChart').getContext('2d');
     if (profitChart) profitChart.destroy();
+
+    // Benchmark comparison mode: show % returns
+    if (showBenchmark && portfolioData && portfolioData.benchmarks) {
+        const baseV = filtered[0].v;
+        const portfolioReturns = filtered.map(s => baseV > 0 ? ((s.v - baseV) / baseV * 100) : 0);
+        const datasets = [{
+            label: '我的组合',
+            data: portfolioReturns,
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99,102,241,0.08)',
+            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
+        }];
+        const bmColors = { '沪深300': '#ef4444', '纳斯达克': '#10b981', '标普500': '#f59e0b' };
+        const startDate = filtered[0].t.slice(0, 10);
+        for (const [bmName, bmData] of Object.entries(portfolioData.benchmarks)) {
+            if (!bmData || bmData.length < 2) continue;
+            // Find starting point aligned with portfolio start date
+            let startIdx = bmData.findIndex(d => d.date >= startDate);
+            if (startIdx < 0) startIdx = 0;
+            const bmBase = bmData[startIdx].close;
+            if (bmBase <= 0) continue;
+            // Build date->return map
+            const bmReturns = {};
+            for (let i = startIdx; i < bmData.length; i++) {
+                bmReturns[bmData[i].date] = (bmData[i].close - bmBase) / bmBase * 100;
+            }
+            // Align with filtered timestamps
+            let lastBmReturn = 0;
+            const aligned = filtered.map(s => {
+                const day = s.t.slice(0, 10);
+                if (bmReturns[day] !== undefined) lastBmReturn = bmReturns[day];
+                return Math.round(lastBmReturn * 100) / 100;
+            });
+            datasets.push({
+                label: bmName,
+                data: aligned,
+                borderColor: bmColors[bmName] || '#94a3b8',
+                fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.8,
+                borderDash: [4, 3],
+            });
+        }
+        profitChart = new Chart(ctx, {
+            type: 'line',
+            data: { labels, datasets },
+            options: {
+                responsive: true,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
+                    tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.y >= 0 ? '+' : ''}${c.parsed.y.toFixed(2)}%` } }
+                },
+                scales: {
+                    x: { display: true, grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', maxTicksLimit: 8 } },
+                    y: { display: true, grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, color: '#94a3b8', callback: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' } }
+                }
+            }
+        });
+        document.getElementById('chartInfo').textContent = `基准对比模式 · ${filtered.length} 个数据点 · 收益率%`;
+        return;
+    }
+
+    // Normal mode: absolute values
+    const values = filtered.map(s => s.v);
+    const costs = filtered.map(s => s.c);
+    const pnls = filtered.map(s => Math.round((s.v - s.c) * 100) / 100);
+    const isUp = pnls.length > 1 && pnls[pnls.length - 1] >= pnls[0];
+
     profitChart = new Chart(ctx, {
         type: 'line',
         data: {
             labels,
             datasets: [
-                {
-                    label: '总市值 (CNY)',
-                    data: values,
-                    borderColor: '#6366f1',
-                    backgroundColor: 'rgba(99,102,241,0.08)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                },
-                {
-                    label: '总成本',
-                    data: costs,
-                    borderColor: '#94a3b8',
-                    borderDash: [4, 4],
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 1.5,
-                },
-                {
-                    label: '浮动盈亏',
-                    data: pnls,
-                    borderColor: isUp ? '#ef4444' : '#10b981',
-                    backgroundColor: isUp ? 'rgba(239,68,68,0.06)' : 'rgba(16,185,129,0.06)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 2,
-                    yAxisID: 'y1',
-                }
+                { label: '总市值 (CNY)', data: values, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.08)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+                { label: '总成本', data: costs, borderColor: '#94a3b8', borderDash: [4, 4], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 1.5 },
+                { label: '浮动盈亏', data: pnls, borderColor: isUp ? '#ef4444' : '#10b981', backgroundColor: isUp ? 'rgba(239,68,68,0.06)' : 'rgba(16,185,129,0.06)', fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2, yAxisID: 'y1' }
             ]
         },
         options: {
@@ -630,11 +720,7 @@ function updateProfitChart(snapshots) {
             interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: { position: 'top', labels: { font: { size: 11 }, usePointStyle: true, padding: 16 } },
-                tooltip: {
-                    callbacks: {
-                        label: (ctx) => `${ctx.dataset.label}: ¥${fmtW(ctx.parsed.y)}`
-                    }
-                }
+                tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ¥${fmtW(c.parsed.y)}` } }
             },
             scales: {
                 x: { display: true, grid: { display: false }, ticks: { font: { size: 10 }, color: '#94a3b8', maxTicksLimit: 8 } },
@@ -643,7 +729,6 @@ function updateProfitChart(snapshots) {
             }
         }
     });
-
     document.getElementById('chartInfo').textContent = `共 ${snapshots.length} 个数据点 · 当前显示 ${filtered.length} 个 · 每分钟记录一次`;
 }
 
@@ -812,6 +897,114 @@ function renderAnalysis(data, rate, totalCNY) {
     });
 
     container.innerHTML = cards.join('');
+}
+
+// ---- Risk Metrics ----
+function renderRiskMetrics(rm) {
+    const mddEl = document.getElementById('riskMDD');
+    mddEl.textContent = `-${rm.maxDrawdown}%`;
+    mddEl.className = `text-xl font-bold ${rm.maxDrawdown > 10 ? 'text-red-500' : rm.maxDrawdown > 5 ? 'text-orange-500' : 'text-emerald-600'}`;
+
+    document.getElementById('riskVol').textContent = `${rm.volatility}%`;
+    document.getElementById('riskVol').className = `text-xl font-bold ${rm.volatility > 30 ? 'text-red-500' : rm.volatility > 15 ? 'text-orange-500' : 'text-emerald-600'}`;
+
+    const sharpeEl = document.getElementById('riskSharpe');
+    sharpeEl.textContent = rm.sharpe;
+    sharpeEl.className = `text-xl font-bold ${rm.sharpe > 1 ? 'text-emerald-600' : rm.sharpe > 0 ? 'text-indigo-600' : 'text-red-500'}`;
+
+    const annEl = document.getElementById('riskAnnual');
+    annEl.textContent = `${rm.annualReturn >= 0 ? '+' : ''}${rm.annualReturn}%`;
+    annEl.className = `text-xl font-bold ${rm.annualReturn >= 0 ? 'text-red-500' : 'text-emerald-600'}`;
+
+    const totEl = document.getElementById('riskTotal');
+    totEl.textContent = `${rm.totalReturn >= 0 ? '+' : ''}${rm.totalReturn}%`;
+    totEl.className = `text-xl font-bold ${rm.totalReturn >= 0 ? 'text-red-500' : 'text-emerald-600'}`;
+
+    // Beta - show first available
+    const betaEl = document.getElementById('riskBeta');
+    const betaLabel = document.getElementById('riskBetaLabel');
+    const betaEntries = Object.entries(rm.betas || {});
+    if (betaEntries.length > 0) {
+        const [bmName, beta] = betaEntries[0];
+        betaEl.textContent = beta;
+        betaEl.className = `text-xl font-bold ${Math.abs(beta) > 1.2 ? 'text-red-500' : Math.abs(beta) > 0.8 ? 'text-orange-500' : 'text-emerald-600'}`;
+        betaLabel.textContent = `vs ${bmName}`;
+    }
+}
+
+// ---- Correlation Matrix ----
+function renderCorrelation(corr) {
+    if (!corr || !corr.symbols || corr.symbols.length < 2) {
+        document.getElementById('correlationMatrix').innerHTML = '<p class="text-slate-400 text-xs">数据不足</p>';
+        return;
+    }
+    const syms = corr.symbols;
+    const nm = corr.nameMap || {};
+    let html = '<table class="w-full"><thead><tr><th class="p-1"></th>';
+    syms.forEach(s => { html += `<th class="p-1 font-medium text-slate-500 text-center" title="${nm[s] || s}">${(nm[s] || s).slice(0, 3)}</th>`; });
+    html += '</tr></thead><tbody>';
+    syms.forEach(a => {
+        html += `<tr><td class="p-1 font-medium text-slate-500 text-right pr-2 whitespace-nowrap" title="${nm[a] || a}">${(nm[a] || a).slice(0, 4)}</td>`;
+        syms.forEach(b => {
+            const v = corr.matrix[a] ? corr.matrix[a][b] : 0;
+            const abs = Math.abs(v);
+            let bg, fg;
+            if (a === b) { bg = '#e0e7ff'; fg = '#4338ca'; }
+            else if (v > 0.7) { bg = '#fee2e2'; fg = '#dc2626'; }
+            else if (v > 0.4) { bg = '#fef3c7'; fg = '#d97706'; }
+            else if (v < -0.3) { bg = '#dbeafe'; fg = '#2563eb'; }
+            else { bg = '#f8fafc'; fg = '#64748b'; }
+            html += `<td class="p-1 text-center font-mono rounded" style="background:${bg};color:${fg}" title="${(nm[a]||a)} vs ${(nm[b]||b)}: ${v}">${v.toFixed(1)}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="flex gap-3 mt-2 text-xs text-slate-400"><span><span class="inline-block w-3 h-3 rounded" style="background:#fee2e2"></span> 高正相关</span><span><span class="inline-block w-3 h-3 rounded" style="background:#fef3c7"></span> 中等</span><span><span class="inline-block w-3 h-3 rounded" style="background:#dbeafe"></span> 负相关</span></div>';
+    document.getElementById('correlationMatrix').innerHTML = html;
+}
+
+// ---- News ----
+function renderNews(newsData, fullData) {
+    const container = document.getElementById('newsContainer');
+    if (!newsData || Object.keys(newsData).length === 0) {
+        container.innerHTML = '<p class="text-slate-400 text-sm">暂无新闻</p>';
+        return;
+    }
+    // Build name map
+    const nameMap = {};
+    fullData.accounts.forEach(acc => acc.holdings.forEach(h => { nameMap[h.symbol] = h.name; }));
+
+    let html = '';
+    for (const [symbol, articles] of Object.entries(newsData)) {
+        if (!articles || articles.length === 0) continue;
+        const name = nameMap[symbol] || symbol;
+        html += `<div class="glass-card rounded-xl p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="font-bold text-slate-800 text-sm">${esc(name)}</span>
+                <span class="text-xs text-slate-400">${symbol}</span>
+            </div>
+            <div class="space-y-2">`;
+        articles.slice(0, 4).forEach(a => {
+            const url = a.url || '#';
+            const timeStr = a.time ? new Date(a.time).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+            html += `<a href="${esc(url)}" target="_blank" rel="noopener" class="block hover:bg-slate-50 rounded p-1.5 -mx-1.5 transition">
+                <div class="text-xs text-slate-700 leading-relaxed line-clamp-2">${esc(a.title)}</div>
+                <div class="flex gap-2 mt-0.5">
+                    ${a.source ? `<span class="text-xs text-slate-400">${esc(a.source)}</span>` : ''}
+                    ${timeStr ? `<span class="text-xs text-slate-300">${timeStr}</span>` : ''}
+                </div>
+            </a>`;
+        });
+        html += '</div></div>';
+    }
+    container.innerHTML = html || '<p class="text-slate-400 text-sm">暂无新闻</p>';
+}
+
+// ---- Benchmark Overlay ----
+let showBenchmark = false;
+function toggleBenchmark() {
+    showBenchmark = document.getElementById('showBenchmark').checked;
+    if (portfolioData && portfolioData.history) updateProfitChart(portfolioData.history);
 }
 
 // ---- Init ----

@@ -459,6 +459,14 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: news for a specific stock
+  if (urlObj.pathname === "/api/news" && req.method === "GET") {
+    const sym = urlObj.searchParams.get("symbol") || "";
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(newsCache[sym] || []));
+    return;
+  }
+
   res.writeHead(404);
   res.end("Not found");
 });
@@ -597,6 +605,160 @@ async function refreshKlines(prices) {
   console.log(`K-line data updated for ${tasks.length} stocks`);
 }
 
+// ---- Benchmarks ----
+const BENCHMARKS = [
+  { name: "沪深300", secid: "1.000300" },
+  { name: "纳斯达克", secid: "100.NDX" },
+  { name: "标普500", secid: "100.SPX" },
+];
+const benchmarkCache = {};
+let bmLastFetch = 0;
+
+async function refreshBenchmarks() {
+  if (Date.now() - bmLastFetch < 30 * 60 * 1000 && Object.keys(benchmarkCache).length > 0) return;
+  bmLastFetch = Date.now();
+  await Promise.all(BENCHMARKS.map((bm) =>
+    fetchKlineEastMoney(bm.secid).then((k) => { if (k.length) benchmarkCache[bm.name] = k; }).catch(() => {})
+  ));
+}
+
+// ---- Risk Metrics ----
+function calcRiskMetrics(snapshots) {
+  if (!snapshots || snapshots.length < 5) return null;
+  const byDay = {};
+  snapshots.forEach((s) => { byDay[s.t.slice(0, 10)] = s; });
+  const days = Object.values(byDay).sort((a, b) => a.t.localeCompare(b.t));
+  if (days.length < 2) return null;
+
+  const returns = [];
+  for (let i = 1; i < days.length; i++) {
+    if (days[i - 1].v > 0) returns.push((days[i].v - days[i - 1].v) / days[i - 1].v);
+  }
+  if (returns.length < 1) return null;
+
+  // Max Drawdown
+  let peak = days[0].v, maxDD = 0;
+  days.forEach((s) => { if (s.v > peak) peak = s.v; const dd = peak > 0 ? (peak - s.v) / peak : 0; if (dd > maxDD) maxDD = dd; });
+
+  // Volatility
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance = returns.length > 1 ? returns.reduce((a, r) => a + (r - mean) ** 2, 0) / (returns.length - 1) : 0;
+  const annualVol = Math.sqrt(variance) * Math.sqrt(252);
+
+  // Returns
+  const totalReturn = days[0].v > 0 ? (days[days.length - 1].v - days[0].v) / days[0].v : 0;
+  const annualReturn = days.length > 1 ? (Math.pow(1 + totalReturn, 252 / days.length) - 1) : 0;
+  const sharpe = annualVol > 0 ? (annualReturn - 0.03) / annualVol : 0;
+
+  // Beta vs benchmarks
+  const betas = {};
+  for (const [bmName, bmKlines] of Object.entries(benchmarkCache)) {
+    if (bmKlines.length < 2) continue;
+    const bmByDate = {}; bmKlines.forEach((k) => { bmByDate[k.date] = k.c; });
+    const dates = Object.keys(byDay).sort();
+    const rp = [], rb = [];
+    for (let i = 1; i < dates.length; i++) {
+      if (bmByDate[dates[i - 1]] && bmByDate[dates[i]] && byDay[dates[i - 1]].v > 0 && bmByDate[dates[i - 1]] > 0) {
+        rp.push((byDay[dates[i]].v - byDay[dates[i - 1]].v) / byDay[dates[i - 1]].v);
+        rb.push((bmByDate[dates[i]] - bmByDate[dates[i - 1]]) / bmByDate[dates[i - 1]]);
+      }
+    }
+    if (rp.length >= 3) {
+      const mp = rp.reduce((a, b) => a + b, 0) / rp.length;
+      const mb = rb.reduce((a, b) => a + b, 0) / rb.length;
+      let cov = 0, vb = 0;
+      for (let i = 0; i < rp.length; i++) { cov += (rp[i] - mp) * (rb[i] - mb); vb += (rb[i] - mb) ** 2; }
+      betas[bmName] = vb > 0 ? +(cov / vb).toFixed(2) : 0;
+    }
+  }
+
+  return {
+    maxDrawdown: +(maxDD * 100).toFixed(2),
+    volatility: +(annualVol * 100).toFixed(2),
+    sharpe: +sharpe.toFixed(2),
+    annualReturn: +(annualReturn * 100).toFixed(2),
+    totalReturn: +(totalReturn * 100).toFixed(2),
+    betas,
+    dataPoints: days.length,
+  };
+}
+
+// ---- Correlation Matrix ----
+function calcCorrelationMatrix() {
+  const symbols = Object.keys(klineCache).filter((s) => klineCache[s].length >= 10);
+  if (symbols.length < 2) return null;
+  const returnsMap = {};
+  symbols.forEach((sym) => {
+    returnsMap[sym] = {};
+    const kl = klineCache[sym];
+    for (let i = 1; i < kl.length; i++) {
+      if (kl[i - 1].c > 0) returnsMap[sym][kl[i].date] = (kl[i].c - kl[i - 1].c) / kl[i - 1].c;
+    }
+  });
+
+  // Get symbol names from portfolio
+  const portfolio = loadPortfolio();
+  const nameMap = {};
+  portfolio.accounts.forEach((acc) => acc.holdings.forEach((h) => { nameMap[h.symbol] = h.name; }));
+
+  const matrix = {};
+  for (let i = 0; i < symbols.length; i++) {
+    matrix[symbols[i]] = {};
+    for (let j = 0; j < symbols.length; j++) {
+      if (i === j) { matrix[symbols[i]][symbols[j]] = 1; continue; }
+      const ra = [], rb = [];
+      Object.keys(returnsMap[symbols[i]]).forEach((d) => {
+        if (returnsMap[symbols[j]][d] !== undefined) { ra.push(returnsMap[symbols[i]][d]); rb.push(returnsMap[symbols[j]][d]); }
+      });
+      if (ra.length < 5) { matrix[symbols[i]][symbols[j]] = 0; continue; }
+      const ma = ra.reduce((a, b) => a + b, 0) / ra.length;
+      const mb = rb.reduce((a, b) => a + b, 0) / rb.length;
+      let cov = 0, va = 0, vb = 0;
+      for (let k = 0; k < ra.length; k++) { cov += (ra[k] - ma) * (rb[k] - mb); va += (ra[k] - ma) ** 2; vb += (rb[k] - mb) ** 2; }
+      matrix[symbols[i]][symbols[j]] = va > 0 && vb > 0 ? +(cov / Math.sqrt(va * vb)).toFixed(2) : 0;
+    }
+  }
+  return { symbols, nameMap, matrix };
+}
+
+// ---- News ----
+const newsCache = {};
+let newsLastFetch = 0;
+
+function fetchNewsItem(keyword) {
+  return new Promise((resolve) => {
+    const url = `https://searchapi.eastmoney.com/api/Info/search?appid=el1902262&keyword=${encodeURIComponent(keyword)}&pageindex=1&pagesize=5&type=1001`;
+    https.get(url, { headers: { "User-Agent": "Mozilla/5.0", Referer: "https://www.eastmoney.com" }, timeout: 5000 }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(data);
+          if (j.Data && j.Data.InfoList) {
+            resolve(j.Data.InfoList.slice(0, 5).map((item) => ({
+              title: (item.Title || "").replace(/<[^>]+>/g, ""),
+              time: item.ShowTime || "",
+              source: item.MediaName || "",
+              url: item.Url || "",
+            })));
+          } else resolve([]);
+        } catch (e) { resolve([]); }
+      });
+    }).on("error", () => resolve([]));
+  });
+}
+
+async function refreshNews() {
+  if (Date.now() - newsLastFetch < 10 * 60 * 1000 && Object.keys(newsCache).length > 0) return;
+  newsLastFetch = Date.now();
+  const portfolio = loadPortfolio();
+  const holdings = [];
+  portfolio.accounts.forEach((acc) => acc.holdings.forEach((h) => { if (!holdings.find((x) => x.symbol === h.symbol)) holdings.push(h); }));
+  for (const h of holdings) {
+    try { newsCache[h.symbol] = await fetchNewsItem(h.name.replace(/\s*ETF.*$/i, "").trim()); } catch (e) {}
+  }
+}
+
 // WebSocket
 const wss = new WebSocketServer({ server });
 let latestData = null;
@@ -609,6 +771,8 @@ async function refreshPrices() {
     portfolio.accounts.forEach((acc) => acc.holdings.forEach((h) => allHoldings.push(fixMarket(h))));
     const prices = await fetchPrices(allHoldings);
     await refreshKlines(prices);
+    await refreshBenchmarks();
+    refreshNews(); // non-blocking
 
     const result = {
       exchangeRate: portfolio.exchangeRate,
@@ -671,7 +835,15 @@ async function refreshPrices() {
       });
     });
     recordSnapshot(totalCNY, totalCost);
-    result.history = loadHistory().snapshots;
+    const snapshots = loadHistory().snapshots;
+    result.history = snapshots;
+    result.benchmarks = {};
+    for (const [name, klines] of Object.entries(benchmarkCache)) {
+      result.benchmarks[name] = klines.map((k) => ({ date: k.date, close: k.c }));
+    }
+    result.riskMetrics = calcRiskMetrics(snapshots);
+    result.correlation = calcCorrelationMatrix();
+    result.news = newsCache;
 
     latestData = result;
     const msg = JSON.stringify({ type: "portfolio", data: result });
