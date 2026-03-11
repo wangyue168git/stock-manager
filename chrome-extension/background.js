@@ -70,9 +70,7 @@ async function fetchStockPrices(holdings) {
   if (!sinaSymbols.length) return {};
 
   const url = `https://hq.sinajs.cn/list=${sinaSymbols.join(",")}`;
-  const res = await fetch(url, {
-    headers: { Referer: "https://finance.sina.com.cn" },
-  });
+  const res = await fetch(url);
   const text = await res.text();
   const prices = {};
   text.split("\n").filter((l) => l.trim()).forEach((line) => {
@@ -107,11 +105,21 @@ async function fetchStockPrices(holdings) {
   return prices;
 }
 
-// Fetch crypto prices from Coinbase
+// Fetch crypto prices - CryptoCompare first, then Coinbase fallback
 async function fetchCryptoPrices(symbols) {
   const results = {};
   for (const sym of symbols) {
     try {
+      // Primary: CryptoCompare
+      const res = await fetch(`https://min-api.cryptocompare.com/data/price?fsym=${sym}&tsyms=USD`);
+      const j = await res.json();
+      if (j.USD) {
+        results[sym] = { price: parseFloat(j.USD), changePct: 0, change: 0, name: sym };
+        continue;
+      }
+    } catch {}
+    try {
+      // Fallback: Coinbase
       const res = await fetch(`https://api.coinbase.com/v2/prices/${sym}-USD/spot`);
       const j = await res.json();
       if (j.data?.amount) {

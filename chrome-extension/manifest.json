@@ -1,14 +1,24 @@
 {
   "manifest_version": 3,
   "name": "股票组合追踪器",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "实时追踪 A股/美股/加密货币 投资组合，全球可用",
-  "permissions": ["storage", "alarms"],
+  "permissions": ["storage", "alarms", "declarativeNetRequest"],
   "host_permissions": [
     "https://hq.sinajs.cn/*",
     "https://api.coinbase.com/*",
+    "https://min-api.cryptocompare.com/*",
     "https://open.er-api.com/*"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "sina_referer",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
