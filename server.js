@@ -62,6 +62,28 @@ async function getExchangeRate() {
   return cachedRate;
 }
 
+// ---- Auth ----
+const crypto = require("crypto");
+const AUTH_HASH = "c60db372f8279a8e774c102278dbbdcee7c510969bb4c861728b90800a4569fa";
+const AUTH_SALT = "stock-manager-salt:";
+const validTokens = new Set();
+
+function verifyPassword(pwd) {
+  const hash = crypto.createHash("sha256").update(AUTH_SALT + pwd).digest("hex");
+  return hash === AUTH_HASH;
+}
+
+function generateToken() {
+  const token = crypto.randomBytes(32).toString("hex");
+  validTokens.add(token);
+  return token;
+}
+
+function checkAuth(req) {
+  const token = req.headers["x-auth-token"];
+  return token && validTokens.has(token);
+}
+
 function loadPortfolio() {
   try {
     return JSON.parse(fs.readFileSync(PORTFOLIO_FILE, "utf-8"));
@@ -403,8 +425,32 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: add account
+  // API: auth
+  if (urlObj.pathname === "/api/auth" && req.method === "POST") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      try {
+        const { password } = JSON.parse(body);
+        if (verifyPassword(password)) {
+          const token = generateToken();
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true, token }));
+        } else {
+          res.writeHead(403, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "密码错误" }));
+        }
+      } catch (e) {
+        res.writeHead(400);
+        res.end(e.message);
+      }
+    });
+    return;
+  }
+
+  // API: add account (auth required)
   if (urlObj.pathname === "/api/account" && req.method === "POST") {
+    if (!checkAuth(req)) { res.writeHead(401); res.end("Unauthorized"); return; }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -423,8 +469,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: add holding
+  // API: add holding (auth required)
   if (urlObj.pathname === "/api/holding" && req.method === "POST") {
+    if (!checkAuth(req)) { res.writeHead(401); res.end("Unauthorized"); return; }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -448,8 +495,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: update holding (edit shares/costPrice)
+  // API: update holding (auth required)
   if (urlObj.pathname === "/api/holding" && req.method === "PUT") {
+    if (!checkAuth(req)) { res.writeHead(401); res.end("Unauthorized"); return; }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
@@ -475,8 +523,9 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // API: delete holding
+  // API: delete holding (auth required)
   if (urlObj.pathname === "/api/holding" && req.method === "DELETE") {
+    if (!checkAuth(req)) { res.writeHead(401); res.end("Unauthorized"); return; }
     const ai = parseInt(urlObj.searchParams.get("account"));
     const hi = parseInt(urlObj.searchParams.get("index"));
     const p = loadPortfolio();

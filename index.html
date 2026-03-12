@@ -255,6 +255,22 @@
         </div>
     </div>
 
+    <!-- 密码验证弹窗 -->
+    <div id="authModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] hidden items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 w-[360px] max-w-[90vw] animate-[modalIn_.2s_ease]">
+            <h3 class="text-xl font-bold text-slate-800 mb-2">🔐 身份验证</h3>
+            <p class="text-sm text-slate-400 mb-6">请输入管理密码以执行此操作</p>
+            <div>
+                <input id="authPassword" type="password" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="请输入密码">
+                <p id="authError" class="text-xs text-red-500 mt-1 hidden">密码错误，请重试</p>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeAuthModal()" class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-lg text-sm hover:bg-slate-50 transition">取消</button>
+                <button onclick="submitAuth()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">验证</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 编辑持仓弹窗 -->
     <div id="editHoldingModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
         <div class="bg-white rounded-2xl shadow-xl p-8 w-[400px] max-w-[90vw] animate-[modalIn_.2s_ease]">
@@ -288,11 +304,15 @@ let chartRange = '1d';
 let lastChartHash = '', lastProfitLen = 0;
 let maskMode = localStorage.getItem('maskMode') === '1';
 let attrMode = 'total'; // 'total' or 'day'
+let authToken = sessionStorage.getItem('authToken') || '';
+let pendingAuthAction = null; // callback after successful auth
 
 function toggleMask() {
-    maskMode = !maskMode;
-    localStorage.setItem('maskMode', maskMode ? '1' : '0');
-    applyMask();
+    requireAuth(() => {
+        maskMode = !maskMode;
+        localStorage.setItem('maskMode', maskMode ? '1' : '0');
+        applyMask();
+    });
 }
 function applyMask() {
     document.body.classList.toggle('mask-mode', maskMode);
@@ -615,22 +635,26 @@ function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 
 // ---- Modals ----
 function showAddHolding() {
-    const sel = document.getElementById('fAccount');
-    sel.innerHTML = '';
-    if (portfolioData) {
-        portfolioData.accounts.forEach((acc, i) => {
-            sel.innerHTML += `<option value="${i}">${esc(acc.name)}</option>`;
-        });
-    }
-    const modal = document.getElementById('addHoldingModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
+    requireAuth(() => {
+        const sel = document.getElementById('fAccount');
+        sel.innerHTML = '';
+        if (portfolioData) {
+            portfolioData.accounts.forEach((acc, i) => {
+                sel.innerHTML += `<option value="${i}">${esc(acc.name)}</option>`;
+            });
+        }
+        const modal = document.getElementById('addHoldingModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    });
 }
 
 function showAddAccount() {
-    const modal = document.getElementById('addAccountModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
+    requireAuth(() => {
+        const modal = document.getElementById('addAccountModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    });
 }
 
 function closeModals() {
@@ -659,7 +683,7 @@ async function submitHolding() {
     if (!data.holding.symbol || !data.holding.name || !data.holding.shares) {
         alert('请填写完整信息'); return;
     }
-    await fetch('/api/holding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    await fetch('/api/holding', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
     closeModals();
     ['fSymbol','fName','fShares','fCost'].forEach(id => document.getElementById(id).value = '');
 }
@@ -667,29 +691,33 @@ async function submitHolding() {
 async function submitAccount() {
     const data = { name: document.getElementById('fAccName').value.trim(), currency: document.getElementById('fAccCurrency').value };
     if (!data.name) { alert('请输入账户名称'); return; }
-    await fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    await fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
     closeModals();
     document.getElementById('fAccName').value = '';
 }
 
 async function deleteHolding(ai, hi) {
-    if (!confirm('确认删除此持仓？')) return;
-    await fetch(`/api/holding?account=${ai}&index=${hi}`, { method: 'DELETE' });
+    requireAuth(() => {
+        if (!confirm('确认删除此持仓？')) return;
+        fetch(`/api/holding?account=${ai}&index=${hi}`, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } });
+    });
 }
 
 function showEditHolding(ai, hi) {
-    const acc = portfolioData.accounts[ai];
-    const h = acc && acc.holdings[hi];
-    if (!h) return;
-    document.getElementById('editAi').value = ai;
-    document.getElementById('editHi').value = hi;
-    document.getElementById('editShares').value = h.shares;
-    document.getElementById('editCost').value = h.costPrice;
-    document.getElementById('editSubtitle').textContent = `${h.name} (${h.symbol})`;
-    const modal = document.getElementById('editHoldingModal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
-    document.getElementById('editShares').focus();
+    requireAuth(() => {
+        const acc = portfolioData.accounts[ai];
+        const h = acc && acc.holdings[hi];
+        if (!h) return;
+        document.getElementById('editAi').value = ai;
+        document.getElementById('editHi').value = hi;
+        document.getElementById('editShares').value = h.shares;
+        document.getElementById('editCost').value = h.costPrice;
+        document.getElementById('editSubtitle').textContent = `${h.name} (${h.symbol})`;
+        const modal = document.getElementById('editHoldingModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.getElementById('editShares').focus();
+    });
 }
 
 async function submitEdit() {
@@ -702,7 +730,7 @@ async function submitEdit() {
     }
     await fetch('/api/holding', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
         body: JSON.stringify({ accountIndex: ai, holdingIndex: hi, shares, costPrice })
     });
     closeModals();
@@ -1283,6 +1311,61 @@ function toggleBenchmark() {
     lastProfitLen = 0; // force chart rebuild
     if (portfolioData && portfolioData.history) updateProfitChart(portfolioData.history);
 }
+
+// ---- Auth ----
+function requireAuth(callback) {
+    if (authToken) { callback(); return; }
+    pendingAuthAction = callback;
+    document.getElementById('authError').classList.add('hidden');
+    document.getElementById('authPassword').value = '';
+    const modal = document.getElementById('authModal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    setTimeout(() => document.getElementById('authPassword').focus(), 100);
+}
+
+function closeAuthModal() {
+    const modal = document.getElementById('authModal');
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+    pendingAuthAction = null;
+}
+
+async function submitAuth() {
+    const pwd = document.getElementById('authPassword').value;
+    if (!pwd) return;
+    try {
+        const res = await fetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwd })
+        });
+        const data = await res.json();
+        if (data.ok && data.token) {
+            authToken = data.token;
+            sessionStorage.setItem('authToken', authToken);
+            closeAuthModal();
+            if (pendingAuthAction) { const cb = pendingAuthAction; pendingAuthAction = null; cb(); }
+        } else {
+            document.getElementById('authError').classList.remove('hidden');
+            document.getElementById('authPassword').value = '';
+            document.getElementById('authPassword').focus();
+        }
+    } catch (e) {
+        document.getElementById('authError').textContent = '验证失败: ' + e.message;
+        document.getElementById('authError').classList.remove('hidden');
+    }
+}
+
+// Enter key to submit password
+document.getElementById('authPassword').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitAuth();
+});
+
+// Close auth modal on overlay click
+document.getElementById('authModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('authModal')) closeAuthModal();
+});
 
 // ---- Init ----
 connect();
