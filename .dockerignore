@@ -1,0 +1,5 @@
+node_modules
+chrome-extension
+.git
+*.md
+render.yaml

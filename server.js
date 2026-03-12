@@ -987,6 +987,185 @@ async function refreshDividends() {
   }
 }
 
+// ---- VIX Fear Index ----
+let vixCache = null;
+let vixLastFetch = 0;
+const VIX_INTERVAL = 5 * 60 * 1000; // refresh every 5 min
+
+function fetchYahooQuote(symbol) {
+  return new Promise((resolve) => {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=2d&interval=1d`;
+    https.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 8000 }, (res) => {
+      let data = "";
+      res.on("data", (c) => (data += c));
+      res.on("end", () => {
+        try {
+          const j = JSON.parse(data);
+          const meta = j.chart?.result?.[0]?.meta;
+          if (meta) {
+            const price = meta.regularMarketPrice || 0;
+            const prevClose = meta.chartPreviousClose || 0;
+            const change = Math.round((price - prevClose) * 10000) / 10000;
+            const changePct = prevClose > 0 ? Math.round((change / prevClose) * 10000) / 100 : 0;
+            resolve({ price, prevClose, change, changePct, name: meta.shortName || symbol });
+          } else resolve(null);
+        } catch { resolve(null); }
+      });
+    }).on("error", () => resolve(null));
+  });
+}
+
+function fetchVIX() {
+  return new Promise(async (resolve) => {
+    try {
+      // Fetch VIX and US indices in parallel from Yahoo Finance
+      const [vix, dji, ixic, spx] = await Promise.all([
+        fetchYahooQuote("^VIX"),
+        fetchYahooQuote("^DJI"),
+        fetchYahooQuote("^IXIC"),
+        fetchYahooQuote("^GSPC"),
+      ]);
+
+      if (vix && vix.price > 0) {
+        let level, color;
+        if (vix.price < 12) { level = "极度贪婪"; color = "#10b981"; }
+        else if (vix.price < 17) { level = "贪婪"; color = "#34d399"; }
+        else if (vix.price < 20) { level = "中性"; color = "#f59e0b"; }
+        else if (vix.price < 25) { level = "恐惧"; color = "#f97316"; }
+        else if (vix.price < 30) { level = "高度恐惧"; color = "#ef4444"; }
+        else { level = "极度恐惧"; color = "#dc2626"; }
+
+        const indices = {};
+        if (dji) indices.DJI = { name: "道琼斯", price: dji.price, change: dji.change, changePct: dji.changePct };
+        if (ixic) indices.IXIC = { name: "纳斯达克", price: ixic.price, change: ixic.change, changePct: ixic.changePct };
+        if (spx) indices.SPX = { name: "标普500", price: spx.price, change: spx.change, changePct: spx.changePct };
+
+        vixCache = {
+          vix: vix.price,
+          vixChange: vix.change,
+          vixChangePct: vix.changePct,
+          level, color, indices,
+          lastUpdate: new Date().toISOString(),
+        };
+        vixLastFetch = Date.now();
+        console.log(`VIX updated: ${vix.price} (${level})`);
+      }
+    } catch (e) {
+      console.error("VIX fetch error:", e.message);
+    }
+    resolve(vixCache);
+  });
+}
+
+async function getVIX() {
+  if (!vixCache || Date.now() - vixLastFetch > VIX_INTERVAL) {
+    await fetchVIX();
+  }
+  return vixCache;
+}
+
+// ---- Bitcoin Hoarding Index (AHR999) ----
+let btcCache = null;
+let btcLastFetch = 0;
+const BTC_INTERVAL = 5 * 60 * 1000; // 5 min
+
+function fetchBTCIndex() {
+  return new Promise(async (resolve) => {
+    try {
+      // Fetch BTC 200-day history + 2-day price in parallel
+      const [btcHistory, btc2d, fng] = await Promise.all([
+        new Promise((res) => {
+          const url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=200d&interval=1d";
+          https.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 10000 }, (resp) => {
+            let data = "";
+            resp.on("data", (c) => (data += c));
+            resp.on("end", () => { try { res(JSON.parse(data)); } catch { res(null); } });
+          }).on("error", () => res(null));
+        }),
+        new Promise((res) => {
+          const url = "https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?range=2d&interval=1d";
+          https.get(url, { headers: { "User-Agent": "Mozilla/5.0" }, timeout: 10000 }, (resp) => {
+            let data = "";
+            resp.on("data", (c) => (data += c));
+            resp.on("end", () => { try { res(JSON.parse(data)); } catch { res(null); } });
+          }).on("error", () => res(null));
+        }),
+        new Promise((res) => {
+          https.get("https://api.alternative.me/fng/?limit=1", {
+            headers: { "User-Agent": "Mozilla/5.0" }, timeout: 8000,
+          }, (resp) => {
+            let data = "";
+            resp.on("data", (c) => (data += c));
+            resp.on("end", () => { try { res(JSON.parse(data)); } catch { res(null); } });
+          }).on("error", () => res(null));
+        }),
+      ]);
+
+      const r = btcHistory?.chart?.result?.[0];
+      if (r) {
+        const price = r.meta?.regularMarketPrice || 0;
+        // Use 2-day data for accurate daily change
+        const prevClose2d = btc2d?.chart?.result?.[0]?.meta?.chartPreviousClose || 0;
+        const closes = (r.indicators?.quote?.[0]?.close || []).filter((c) => c != null);
+        const ma200 = closes.length > 0 ? closes.reduce((s, v) => s + v, 0) / closes.length : 0;
+
+        // AHR999 calculation
+        const genesis = new Date("2009-01-03").getTime();
+        const days = (Date.now() - genesis) / 86400000;
+        const growthVal = Math.pow(10, 5.84 * Math.log10(days) - 17.01);
+        const ahr999 = ma200 > 0 && growthVal > 0 ? (price / ma200) * (price / growthVal) : 0;
+
+        // AHR999 level
+        let level, color, advice;
+        if (ahr999 < 0.45) {
+          level = "抄底区"; color = "#10b981"; advice = "AHR999 < 0.45：价格低于成本和增长曲线，历史底部区域";
+        } else if (ahr999 < 1.2) {
+          level = "定投区"; color = "#3b82f6"; advice = "AHR999 0.45-1.2：适合定期定额买入，长期持有";
+        } else {
+          level = "等待区"; color = "#ef4444"; advice = "AHR999 > 1.2：价格偏高，建议持币观望或分批止盈";
+        }
+
+        // BTC price change (from 2-day data for accuracy)
+        const prevClose = prevClose2d || 0;
+        const btcChange = Math.round((price - prevClose) * 100) / 100;
+        const btcChangePct = prevClose > 0 ? Math.round((btcChange / prevClose) * 10000) / 100 : 0;
+
+        // Crypto Fear & Greed
+        const fngValue = fng?.data?.[0] ? parseInt(fng.data[0].value) : null;
+        const fngClass = fng?.data?.[0]?.value_classification || null;
+        let fngLevel = null;
+        if (fngClass === "Extreme Fear") fngLevel = "极度恐惧";
+        else if (fngClass === "Fear") fngLevel = "恐惧";
+        else if (fngClass === "Neutral") fngLevel = "中性";
+        else if (fngClass === "Greed") fngLevel = "贪婪";
+        else if (fngClass === "Extreme Greed") fngLevel = "极度贪婪";
+
+        btcCache = {
+          price, btcChange, btcChangePct,
+          ma200: Math.round(ma200 * 100) / 100,
+          growthVal: Math.round(growthVal * 100) / 100,
+          ahr999: Math.round(ahr999 * 10000) / 10000,
+          level, color, advice,
+          fng: fngValue, fngLevel, fngClass,
+          lastUpdate: new Date().toISOString(),
+        };
+        btcLastFetch = Date.now();
+        console.log(`BTC index updated: price=$${price}, AHR999=${ahr999.toFixed(4)} (${level}), F&G=${fngValue}`);
+      }
+    } catch (e) {
+      console.error("BTC index fetch error:", e.message);
+    }
+    resolve(btcCache);
+  });
+}
+
+async function getBTCIndex() {
+  if (!btcCache || Date.now() - btcLastFetch > BTC_INTERVAL) {
+    await fetchBTCIndex();
+  }
+  return btcCache;
+}
+
 // WebSocket
 const wss = new WebSocketServer({ server });
 let latestData = null;
@@ -1002,6 +1181,8 @@ async function refreshPrices() {
     await refreshBenchmarks();
     refreshNews(); // non-blocking
     refreshDividends(); // non-blocking, daily refresh
+    getVIX(); // non-blocking, refresh VIX
+    getBTCIndex(); // non-blocking, refresh BTC hoarding index
 
     const result = {
       exchangeRate: portfolio.exchangeRate,
@@ -1112,6 +1293,8 @@ async function refreshPrices() {
       USD_HKD: cachedRate?.USD_HKD || 7.82,
       lastUpdate: rateLastFetch ? new Date(rateLastFetch).toISOString() : null,
     };
+    result.fearGreed = vixCache;
+    result.btcIndex = btcCache;
 
     latestData = result;
     const msg = JSON.stringify({ type: "portfolio", data: result });

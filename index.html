@@ -110,6 +110,143 @@
             </div>
         </div>
 
+        <!-- 恐慌指数表盘 -->
+        <div class="glass-card p-6 rounded-2xl shadow-sm mb-8" id="fearGreedSection">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-slate-800">美股恐慌指数 (VIX)</h3>
+                <span class="text-xs text-slate-400" id="vixUpdateTime"></span>
+            </div>
+            <div class="flex flex-col md:flex-row items-center gap-6">
+                <!-- Gauge -->
+                <div class="relative flex-shrink-0" style="width:220px;height:130px">
+                    <svg viewBox="0 0 220 130" class="w-full h-full">
+                        <defs>
+                            <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#10b981"/>
+                                <stop offset="25%" style="stop-color:#34d399"/>
+                                <stop offset="40%" style="stop-color:#f59e0b"/>
+                                <stop offset="55%" style="stop-color:#f97316"/>
+                                <stop offset="75%" style="stop-color:#ef4444"/>
+                                <stop offset="100%" style="stop-color:#dc2626"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Background arc -->
+                        <path d="M 20 115 A 90 90 0 0 1 200 115" fill="none" stroke="#e5e7eb" stroke-width="14" stroke-linecap="round"/>
+                        <!-- Colored arc -->
+                        <path d="M 20 115 A 90 90 0 0 1 200 115" fill="none" stroke="url(#gaugeGrad)" stroke-width="14" stroke-linecap="round"/>
+                        <!-- Needle -->
+                        <line id="vixNeedle" x1="110" y1="115" x2="110" y2="35" stroke="#334155" stroke-width="2.5" stroke-linecap="round" transform="rotate(-90, 110, 115)" style="transition: transform 1s ease-out"/>
+                        <!-- Center circle -->
+                        <circle cx="110" cy="115" r="5" fill="#334155"/>
+                        <!-- Scale labels -->
+                        <text x="15" y="128" fill="#94a3b8" font-size="9" text-anchor="start">0</text>
+                        <text x="45" y="50" fill="#10b981" font-size="8" text-anchor="middle">贪婪</text>
+                        <text x="110" y="30" fill="#f59e0b" font-size="8" text-anchor="middle">中性</text>
+                        <text x="175" y="50" fill="#ef4444" font-size="8" text-anchor="middle">恐惧</text>
+                        <text x="205" y="128" fill="#94a3b8" font-size="9" text-anchor="end">50+</text>
+                    </svg>
+                </div>
+                <!-- VIX Info -->
+                <div class="flex-1 text-center md:text-left">
+                    <div class="flex items-center gap-3 justify-center md:justify-start mb-2">
+                        <span id="vixValue" class="text-4xl font-bold text-slate-800">--</span>
+                        <span id="vixChange" class="text-sm font-medium px-2 py-0.5 rounded-full">--</span>
+                    </div>
+                    <div id="vixLevel" class="text-lg font-semibold mb-1">--</div>
+                    <p id="vixDesc" class="text-xs text-slate-400">VIX 恐慌指数衡量标普500期权的隐含波动率</p>
+                </div>
+                <!-- US Market Indices -->
+                <div class="flex-shrink-0 grid grid-cols-3 gap-3" id="usIndices">
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px]">
+                        <p class="text-xs text-slate-400 mb-1">道琼斯</p>
+                        <p id="idxDJI" class="text-sm font-bold text-slate-700">--</p>
+                        <p id="idxDJIChg" class="text-xs">--</p>
+                    </div>
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px]">
+                        <p class="text-xs text-slate-400 mb-1">纳斯达克</p>
+                        <p id="idxIXIC" class="text-sm font-bold text-slate-700">--</p>
+                        <p id="idxIXICChg" class="text-xs">--</p>
+                    </div>
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px]">
+                        <p class="text-xs text-slate-400 mb-1">标普500</p>
+                        <p id="idxSPX" class="text-sm font-bold text-slate-700">--</p>
+                        <p id="idxSPXChg" class="text-xs">--</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 比特币屯币指数 -->
+        <div class="glass-card p-6 rounded-2xl shadow-sm mb-8" id="btcIndexSection">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-bold text-slate-800">比特币屯币指数 (AHR999)</h3>
+                <span class="text-xs text-slate-400" id="btcUpdateTime"></span>
+            </div>
+            <div class="flex flex-col md:flex-row items-center gap-6">
+                <!-- AHR999 Gauge -->
+                <div class="relative flex-shrink-0" style="width:220px;height:130px">
+                    <svg viewBox="0 0 220 130" class="w-full h-full">
+                        <defs>
+                            <linearGradient id="btcGaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#10b981"/>
+                                <stop offset="30%" style="stop-color:#3b82f6"/>
+                                <stop offset="80%" style="stop-color:#f59e0b"/>
+                                <stop offset="100%" style="stop-color:#ef4444"/>
+                            </linearGradient>
+                        </defs>
+                        <path d="M 20 115 A 90 90 0 0 1 200 115" fill="none" stroke="#e5e7eb" stroke-width="14" stroke-linecap="round"/>
+                        <path d="M 20 115 A 90 90 0 0 1 200 115" fill="none" stroke="url(#btcGaugeGrad)" stroke-width="14" stroke-linecap="round"/>
+                        <line id="btcNeedle" x1="110" y1="115" x2="110" y2="35" stroke="#334155" stroke-width="2.5" stroke-linecap="round" transform="rotate(-90, 110, 115)" style="transition: transform 1s ease-out"/>
+                        <circle cx="110" cy="115" r="5" fill="#334155"/>
+                        <text x="15" y="128" fill="#94a3b8" font-size="9" text-anchor="start">0</text>
+                        <text x="50" y="50" fill="#10b981" font-size="8" text-anchor="middle">抄底</text>
+                        <text x="95" y="33" fill="#3b82f6" font-size="8" text-anchor="middle">定投</text>
+                        <text x="165" y="45" fill="#ef4444" font-size="8" text-anchor="middle">等待</text>
+                        <text x="205" y="128" fill="#94a3b8" font-size="9" text-anchor="end">3+</text>
+                    </svg>
+                </div>
+                <!-- BTC Price & AHR999 -->
+                <div class="flex-1">
+                    <div class="flex items-center gap-4 mb-3">
+                        <div>
+                            <p class="text-xs text-slate-400 mb-0.5">BTC 价格</p>
+                            <div class="flex items-center gap-2">
+                                <span id="btcPrice" class="text-2xl font-bold text-slate-800">--</span>
+                                <span id="btcChange" class="text-xs font-medium px-2 py-0.5 rounded-full">--</span>
+                            </div>
+                        </div>
+                        <div class="border-l border-slate-200 pl-4">
+                            <p class="text-xs text-slate-400 mb-0.5">AHR999 指数</p>
+                            <span id="btcAhr999" class="text-2xl font-bold">--</span>
+                        </div>
+                    </div>
+                    <div id="btcLevel" class="text-lg font-semibold mb-1">--</div>
+                    <p id="btcAdvice" class="text-xs text-slate-400">AHR999 = (价格/200日均线) x (价格/指数增长估值)</p>
+                </div>
+                <!-- Stats Cards -->
+                <div class="flex-shrink-0 grid grid-cols-2 gap-3">
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px]">
+                        <p class="text-xs text-slate-400 mb-1">200日均线</p>
+                        <p id="btcMA200" class="text-sm font-bold text-slate-700">--</p>
+                    </div>
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px]">
+                        <p class="text-xs text-slate-400 mb-1">增长估值</p>
+                        <p id="btcGrowth" class="text-sm font-bold text-slate-700">--</p>
+                    </div>
+                    <div class="text-center p-3 rounded-xl bg-slate-50 min-w-[100px] col-span-2">
+                        <p class="text-xs text-slate-400 mb-1">加密恐贪指数</p>
+                        <div class="flex items-center justify-center gap-2">
+                            <span id="btcFngValue" class="text-lg font-bold">--</span>
+                            <span id="btcFngLevel" class="text-xs font-medium px-2 py-0.5 rounded-full">--</span>
+                        </div>
+                        <div class="w-full bg-slate-200 rounded-full h-2 mt-2 overflow-hidden">
+                            <div id="btcFngBar" class="h-full rounded-full transition-all duration-700" style="width:50%;background:linear-gradient(90deg,#ef4444,#f59e0b,#10b981)"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 收益归因分析 -->
         <div class="glass-card p-6 rounded-2xl shadow-sm mb-8">
             <div class="flex justify-between items-center mb-4">
@@ -546,6 +683,12 @@ function render(data) {
 
     // Analysis
     renderAnalysis(data, rate, totalCNY);
+
+    // Fear & Greed (VIX)
+    if (data.fearGreed) renderFearGreed(data.fearGreed);
+
+    // BTC Hoarding Index
+    if (data.btcIndex) renderBTCIndex(data.btcIndex);
 
     // Risk metrics
     if (data.riskMetrics) renderRiskMetrics(data.riskMetrics);
@@ -1047,6 +1190,119 @@ function renderAnalysis(data, rate, totalCNY) {
     });
 
     container.innerHTML = cards.join('');
+}
+
+// ---- Fear & Greed (VIX) ----
+function renderFearGreed(fg) {
+    if (!fg || !fg.vix) return;
+    // Update VIX value
+    document.getElementById('vixValue').textContent = fg.vix.toFixed(2);
+
+    // VIX change badge
+    const chgEl = document.getElementById('vixChange');
+    const isUp = fg.vixChange >= 0;
+    chgEl.textContent = `${isUp ? '+' : ''}${fg.vixChange.toFixed(2)} (${isUp ? '+' : ''}${fg.vixChangePct.toFixed(2)}%)`;
+    chgEl.className = `text-sm font-medium px-2 py-0.5 rounded-full ${isUp ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`;
+
+    // Level
+    const levelEl = document.getElementById('vixLevel');
+    levelEl.textContent = fg.level;
+    levelEl.style.color = fg.color;
+
+    // Description based on level
+    const descs = {
+        '极度贪婪': 'VIX < 12：市场极度乐观，投资者无视风险，可能是阶段性顶部信号',
+        '贪婪': 'VIX 12-17：市场情绪偏乐观，波动率处于较低水平',
+        '中性': 'VIX 17-20：市场情绪平衡，波动率处于正常水平',
+        '恐惧': 'VIX 20-25：市场出现不安情绪，波动率上升',
+        '高度恐惧': 'VIX 25-30：市场恐慌加剧，可能出现剧烈波动',
+        '极度恐惧': 'VIX > 30：市场极度恐慌，历史上常伴随抄底机会',
+    };
+    document.getElementById('vixDesc').textContent = descs[fg.level] || 'VIX 恐慌指数衡量标普500期权的隐含波动率';
+
+    // Needle rotation: VIX 0 → -90°, VIX 50+ → +90°
+    const clampedVix = Math.min(Math.max(fg.vix, 0), 50);
+    const angle = -90 + (clampedVix / 50) * 180;
+    document.getElementById('vixNeedle').setAttribute('transform', `rotate(${angle}, 110, 115)`);
+
+    // Update time
+    if (fg.lastUpdate) {
+        const t = new Date(fg.lastUpdate);
+        document.getElementById('vixUpdateTime').textContent = `更新: ${t.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
+    }
+
+    // US Market Indices
+    if (fg.indices) {
+        ['DJI', 'IXIC', 'SPX'].forEach(key => {
+            const idx = fg.indices[key];
+            if (!idx) return;
+            const el = document.getElementById(`idx${key}`);
+            const chg = document.getElementById(`idx${key}Chg`);
+            if (el) el.textContent = idx.price.toLocaleString('en-US', {maximumFractionDigits: 0});
+            if (chg) {
+                const up = idx.changePct >= 0;
+                chg.textContent = `${up ? '+' : ''}${idx.changePct.toFixed(2)}%`;
+                chg.className = `text-xs font-medium ${up ? 'text-red-500' : 'text-emerald-600'}`;
+            }
+        });
+    }
+}
+
+// ---- BTC Hoarding Index (AHR999) ----
+function renderBTCIndex(btc) {
+    if (!btc || !btc.price) return;
+
+    // BTC Price
+    document.getElementById('btcPrice').textContent = '$' + btc.price.toLocaleString('en-US', {maximumFractionDigits: 0});
+
+    // Change badge
+    const chgEl = document.getElementById('btcChange');
+    const isUp = btc.btcChangePct >= 0;
+    chgEl.textContent = `${isUp ? '+' : ''}${btc.btcChangePct.toFixed(2)}%`;
+    chgEl.className = `text-xs font-medium px-2 py-0.5 rounded-full ${isUp ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'}`;
+
+    // AHR999
+    const ahr999El = document.getElementById('btcAhr999');
+    ahr999El.textContent = btc.ahr999.toFixed(4);
+    ahr999El.style.color = btc.color;
+
+    // Level
+    const levelEl = document.getElementById('btcLevel');
+    levelEl.textContent = btc.level;
+    levelEl.style.color = btc.color;
+
+    // Advice
+    document.getElementById('btcAdvice').textContent = btc.advice;
+
+    // Needle: AHR999 0→-90°, AHR999 3→+90°
+    const clamped = Math.min(Math.max(btc.ahr999, 0), 3);
+    const angle = -90 + (clamped / 3) * 180;
+    document.getElementById('btcNeedle').setAttribute('transform', `rotate(${angle}, 110, 115)`);
+
+    // MA200 & Growth
+    document.getElementById('btcMA200').textContent = '$' + btc.ma200.toLocaleString('en-US', {maximumFractionDigits: 0});
+    document.getElementById('btcGrowth').textContent = '$' + btc.growthVal.toLocaleString('en-US', {maximumFractionDigits: 0});
+
+    // Crypto Fear & Greed
+    if (btc.fng != null) {
+        document.getElementById('btcFngValue').textContent = btc.fng;
+        const fngEl = document.getElementById('btcFngLevel');
+        fngEl.textContent = btc.fngLevel || btc.fngClass;
+        let fngColor;
+        if (btc.fng <= 25) fngColor = 'bg-red-100 text-red-600';
+        else if (btc.fng <= 45) fngColor = 'bg-orange-100 text-orange-600';
+        else if (btc.fng <= 55) fngColor = 'bg-yellow-100 text-yellow-700';
+        else if (btc.fng <= 75) fngColor = 'bg-emerald-100 text-emerald-600';
+        else fngColor = 'bg-green-100 text-green-700';
+        fngEl.className = `text-xs font-medium px-2 py-0.5 rounded-full ${fngColor}`;
+        document.getElementById('btcFngBar').style.width = btc.fng + '%';
+    }
+
+    // Update time
+    if (btc.lastUpdate) {
+        const t = new Date(btc.lastUpdate);
+        document.getElementById('btcUpdateTime').textContent = `更新: ${t.toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'})}`;
+    }
 }
 
 // ---- Risk Metrics ----
