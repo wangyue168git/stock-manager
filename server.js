@@ -97,13 +97,23 @@ function savePortfolio(data) {
 }
 
 // ---- History tracking ----
+// In-memory history with file persistence as backup
+let memHistory = { snapshots: [] };
+
 function loadHistory() {
-  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf-8")); }
-  catch (e) { return { snapshots: [] }; }
+  if (memHistory.snapshots.length > 0) return memHistory;
+  try {
+    const data = JSON.parse(fs.readFileSync(HISTORY_FILE, "utf-8"));
+    if (data.snapshots && data.snapshots.length > 0) {
+      memHistory = data;
+    }
+  } catch (e) {}
+  return memHistory;
 }
 
 function saveHistoryFile(data) {
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(data));
+  try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(data)); }
+  catch (e) { /* read-only fs on some platforms */ }
 }
 
 let lastSnapshotTime = 0;
@@ -114,16 +124,18 @@ function recordSnapshot(totalCNY, totalCost) {
   if (now - lastSnapshotTime < SNAPSHOT_INTERVAL) return;
   if (totalCNY <= 0) return;
   lastSnapshotTime = now;
-  const history = loadHistory();
-  history.snapshots.push({
+  memHistory.snapshots.push({
     t: new Date().toISOString(),
     v: Math.round(totalCNY * 100) / 100,
     c: Math.round(totalCost * 100) / 100,
   });
   // Keep max 10000 entries (~7 days at 1-min intervals)
-  if (history.snapshots.length > 10000) history.snapshots = history.snapshots.slice(-10000);
-  saveHistoryFile(history);
+  if (memHistory.snapshots.length > 10000) memHistory.snapshots = memHistory.snapshots.slice(-10000);
+  saveHistoryFile(memHistory);
 }
+
+// Load history from file on startup
+loadHistory();
 
 // Fetch crypto prices - try CryptoCompare first, then Coinbase, then Binance
 function fetchCryptoPrices(symbols) {
