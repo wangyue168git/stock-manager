@@ -553,6 +553,33 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // API: update cash position
+  if (urlObj.pathname === "/api/cash" && req.method === "PUT") {
+    if (!checkAuth(req)) { res.writeHead(401); res.end("Unauthorized"); return; }
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      try {
+        const { account, cash } = JSON.parse(body);
+        const ai = parseInt(account);
+        const p = loadPortfolio();
+        if (p.accounts[ai]) {
+          p.accounts[ai].cash = parseFloat(cash) || 0;
+          savePortfolio(p);
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        } else {
+          res.writeHead(400);
+          res.end("Account not found");
+        }
+      } catch (e) {
+        res.writeHead(400);
+        res.end(e.message);
+      }
+    });
+    return;
+  }
+
   // API: update exchange rate
   if (urlObj.pathname === "/api/rate" && req.method === "POST") {
     let body = "";

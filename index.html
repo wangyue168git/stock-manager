@@ -434,6 +434,23 @@
         </div>
     </div>
 
+    <!-- 编辑现金弹窗 -->
+    <div id="editCashModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
+        <div class="bg-white rounded-2xl shadow-xl p-8 w-[360px] max-w-[90vw] animate-[modalIn_.2s_ease]">
+            <h3 class="text-xl font-bold text-slate-800 mb-2">编辑现金仓位</h3>
+            <p class="text-sm text-slate-400 mb-6" id="editCashSubtitle"></p>
+            <input type="hidden" id="editCashAi">
+            <div>
+                <label class="block text-xs text-slate-500 mb-1 uppercase tracking-wide">现金金额</label>
+                <input id="editCashAmount" type="number" step="0.01" min="0" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="0.00">
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeModals()" class="flex-1 border border-slate-200 text-slate-600 py-2.5 rounded-lg text-sm hover:bg-slate-50 transition">取消</button>
+                <button onclick="submitCashEdit()" class="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">保存</button>
+            </div>
+        </div>
+    </div>
+
 <script>
 let ws, portfolioData = null, prevPrices = {};
 let portfolioChart = null, marketChart = null, profitChart = null;
@@ -502,8 +519,19 @@ function render(data) {
     let allHoldings = [];
     let marketTotals = {};
 
+    let totalCash = 0;
     data.accounts.forEach(acc => {
         const cur = acc.currency || 'CNY';
+        const cashMul = cur === 'USD' ? rate : cur === 'HKD' ? rate / 7.8 : 1;
+        const accCash = acc.cash || 0;
+        if (accCash > 0) {
+            const cashCNY = accCash * cashMul;
+            totalCash += cashCNY;
+            totalCNY += cashCNY;
+            totalCost += cashCNY; // cash has no P&L
+            allHoldings.push({ name: `${acc.name}-现金`, valueCNY: cashCNY });
+            marketTotals['现金'] = (marketTotals['现金'] || 0) + cashCNY;
+        }
         acc.holdings.forEach(h => {
             const mv = h.marketValue || 0;
             const cv = h.costValue || 0;
@@ -570,7 +598,8 @@ function render(data) {
     data.accounts.forEach((acc, ai) => {
         const cur = acc.currency || 'CNY';
         const sym = cur === 'USD' ? '$' : cur === 'HKD' ? 'HK$' : '¥';
-        let accMV = 0, accCost = 0, accDayChg = 0;
+        const accCash = acc.cash || 0;
+        let accMV = accCash, accCost = accCash, accDayChg = 0;
         acc.holdings.forEach(h => {
             accMV += h.marketValue || 0;
             accCost += h.costValue || 0;
@@ -624,6 +653,24 @@ function render(data) {
                     </td>
                 </tr>`;
             });
+
+            // Cash row
+            rowsHtml += `
+            <tr class="border-b last:border-0 hover:bg-slate-50/50 transition">
+                <td class="py-3.5 px-4">
+                    <div class="font-semibold text-slate-800">现金</div>
+                    <div class="text-xs text-slate-400">Cash · ${cur}</div>
+                </td>
+                <td class="py-3.5 px-4 text-sm text-slate-500">--</td>
+                <td class="py-3.5 px-4 text-sm text-slate-600 mask-amount">${accCash > 0 ? sym + fmtN(accCash) : '--'}</td>
+                <td class="py-3.5 px-4"></td>
+                <td class="py-3.5 px-4"></td>
+                <td class="py-3.5 px-4"></td>
+                <td class="py-3.5 px-4 text-right font-mono font-semibold text-slate-700 mask-amount">${accCash > 0 ? sym + fmtW(accCash) : '--'}</td>
+                <td class="py-3.5 px-2 text-right">
+                    <button onclick="showEditCash(${ai})" class="text-slate-300 hover:text-indigo-500 transition text-sm" title="编辑现金">✎</button>
+                </td>
+            </tr>`;
 
             // Subtotal
             const accPnlCls = accPnl >= 0 ? 'text-red-500' : 'text-emerald-600';
@@ -801,14 +848,14 @@ function showAddAccount() {
 }
 
 function closeModals() {
-    document.querySelectorAll('#addHoldingModal,#addAccountModal,#editHoldingModal').forEach(m => {
+    document.querySelectorAll('#addHoldingModal,#addAccountModal,#editHoldingModal,#editCashModal').forEach(m => {
         m.classList.add('hidden');
         m.classList.remove('flex');
     });
 }
 
 // Close on overlay click
-document.querySelectorAll('#addHoldingModal,#addAccountModal,#editHoldingModal').forEach(m => {
+document.querySelectorAll('#addHoldingModal,#addAccountModal,#editHoldingModal,#editCashModal').forEach(m => {
     m.addEventListener('click', (e) => { if (e.target === m) closeModals(); });
 });
 
@@ -875,6 +922,35 @@ async function submitEdit() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
         body: JSON.stringify({ accountIndex: ai, holdingIndex: hi, shares, costPrice })
+    });
+    closeModals();
+}
+
+function showEditCash(ai) {
+    requireAuth(() => {
+        const acc = portfolioData.accounts[ai];
+        if (!acc) return;
+        document.getElementById('editCashAi').value = ai;
+        const sym = (acc.currency || 'CNY') === 'USD' ? '$' : (acc.currency || 'CNY') === 'HKD' ? 'HK$' : '¥';
+        document.getElementById('editCashSubtitle').textContent = `${acc.name} (${acc.currency || 'CNY'})`;
+        document.getElementById('editCashAmount').value = acc.cash || 0;
+        const modal = document.getElementById('editCashModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.getElementById('editCashAmount').focus();
+    });
+}
+
+async function submitCashEdit() {
+    const ai = parseInt(document.getElementById('editCashAi').value);
+    const cash = parseFloat(document.getElementById('editCashAmount').value);
+    if (isNaN(cash) || cash < 0) {
+        alert('请输入有效的现金金额'); return;
+    }
+    await fetch('/api/cash', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
+        body: JSON.stringify({ account: ai, cash })
     });
     closeModals();
 }
