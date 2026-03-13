@@ -3,6 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const { WebSocketServer } = require("ws");
+const grid = require("./grid");
 
 const PORT = process.env.PORT || 3457;
 const PORTFOLIO_FILE = path.join(__dirname, "portfolio.json");
@@ -608,6 +609,11 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Grid trading bot routes
+  if (urlObj.pathname.startsWith("/grid") || urlObj.pathname.startsWith("/api/grid/")) {
+    if (grid.handleGridRequest(req, res, urlObj, checkAuth)) return;
+  }
+
   res.writeHead(404);
   res.end("Not found");
 });
@@ -1207,6 +1213,7 @@ async function getBTCIndex() {
 
 // WebSocket
 const wss = new WebSocketServer({ server });
+grid.setup(wss);
 let latestData = null;
 
 async function refreshPrices() {

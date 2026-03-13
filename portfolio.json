@@ -1,6 +1,6 @@
 {
   "exchangeRate": {
-    "USD_CNY": 6.8766
+    "USD_CNY": 6.8813
   },
   "accounts": [
     {
@@ -35,7 +35,8 @@
           "shares": 12600,
           "costPrice": 0.374
         }
-      ]
+      ],
+      "cash": 0
     },
     {
       "name": "美股-IB",
@@ -52,8 +53,8 @@
           "symbol": "GOOGL",
           "market": "nasdaq",
           "name": "谷歌",
-          "shares": 5,
-          "costPrice": 297
+          "shares": 7,
+          "costPrice": 300
         },
         {
           "symbol": "AXP",
@@ -83,7 +84,8 @@
           "shares": 42,
           "costPrice": 30.8
         }
-      ]
+      ],
+      "cash": 3100
     },
     {
       "name": "币圈",

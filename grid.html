@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网格交易机器人 - Binance</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .glass-card { background: rgba(255,255,255,0.95); backdrop-filter: blur(10px); border: 1px solid rgba(229,231,235,1); }
+        .grid-level { transition: all 0.3s; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .status-dot.running { background: #10b981; animation: pulse 2s infinite; }
+        .status-dot.stopped { background: #94a3b8; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8">
+<div class="max-w-6xl mx-auto">
+    <!-- Header -->
+    <header class="mb-8 flex justify-between items-center">
+        <div>
+            <h1 class="text-3xl font-bold text-slate-800">网格交易机器人</h1>
+            <p class="text-slate-500">Binance 现货网格策略 · 自动低买高卖</p>
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="status-dot stopped" id="statusDot"></span>
+            <span id="statusLabel" class="text-sm text-slate-500">未运行</span>
+            <a href="/" class="text-sm text-indigo-500 hover:text-indigo-700 transition">← 返回看板</a>
+        </div>
+    </header>
+
+    <!-- Status Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="glass-card p-5 rounded-2xl">
+            <p class="text-xs text-slate-400 mb-1">当前价格</p>
+            <p id="currentPrice" class="text-2xl font-bold text-slate-800">--</p>
+        </div>
+        <div class="glass-card p-5 rounded-2xl">
+            <p class="text-xs text-slate-400 mb-1">网格利润</p>
+            <p id="totalProfit" class="text-2xl font-bold text-emerald-600">$0.00</p>
+        </div>
+        <div class="glass-card p-5 rounded-2xl">
+            <p class="text-xs text-slate-400 mb-1">活跃订单</p>
+            <p id="activeOrders" class="text-2xl font-bold text-indigo-600">0</p>
+        </div>
+        <div class="glass-card p-5 rounded-2xl">
+            <p class="text-xs text-slate-400 mb-1">完成交易</p>
+            <p id="tradeCount" class="text-2xl font-bold text-orange-500">0</p>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Config Panel -->
+        <div class="space-y-6">
+            <!-- API Keys -->
+            <div class="glass-card p-6 rounded-2xl">
+                <h3 class="text-lg font-bold text-slate-800 mb-4">API 配置</h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">API Key</label>
+                        <input id="apiKey" type="password" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="Binance API Key">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">API Secret</label>
+                        <input id="apiSecret" type="password" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="Binance API Secret">
+                    </div>
+                    <button onclick="saveKeys()" class="w-full bg-slate-700 text-white py-2 rounded-lg text-sm hover:bg-slate-800 transition">保存密钥</button>
+                    <p id="keyStatus" class="text-xs text-slate-400"></p>
+                </div>
+            </div>
+
+            <!-- Grid Config -->
+            <div class="glass-card p-6 rounded-2xl">
+                <h3 class="text-lg font-bold text-slate-800 mb-4">网格参数</h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-xs text-slate-500 mb-1">交易对</label>
+                        <div class="flex gap-2">
+                            <input id="pair" class="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" value="BTCUSDT" placeholder="BTCUSDT">
+                            <button onclick="fetchCurrentPrice()" class="px-3 py-2 bg-slate-100 rounded-lg text-sm hover:bg-slate-200 transition text-slate-600" title="获取当前价格">刷新</button>
+                        </div>
+                        <p id="priceHint" class="text-xs text-slate-400 mt-1"></p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">价格下限</label>
+                            <input id="lowerPrice" type="number" step="any" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="60000">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">价格上限</label>
+                            <input id="upperPrice" type="number" step="any" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="80000">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">网格数量</label>
+                            <input id="gridCount" type="number" value="10" min="2" max="200" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-slate-500 mb-1">投资金额 (USDT)</label>
+                            <input id="investAmount" type="number" step="any" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300" placeholder="1000">
+                        </div>
+                    </div>
+                    <div id="gridPreview" class="text-xs text-slate-400 p-3 bg-slate-50 rounded-lg hidden">
+                        <p>每格间距: <span id="previewStep">--</span></p>
+                        <p>每格利润: <span id="previewProfit">--</span></p>
+                        <p>单次收益率: <span id="previewRate">--</span></p>
+                    </div>
+                    <button onclick="previewGrid()" class="w-full border border-slate-200 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-100 transition">预览参数</button>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="glass-card p-6 rounded-2xl">
+                <div class="flex gap-3">
+                    <button id="startBtn" onclick="startBot()" class="flex-1 bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 transition">启动机器人</button>
+                    <button id="stopBtn" onclick="stopBot()" class="flex-1 bg-red-500 text-white py-3 rounded-lg font-medium hover:bg-red-600 transition hidden">停止机器人</button>
+                </div>
+                <p id="botError" class="text-xs text-red-500 mt-2 hidden"></p>
+                <div class="mt-4">
+                    <button onclick="fetchBalance()" class="w-full border border-slate-200 text-slate-500 py-2 rounded-lg text-xs hover:bg-slate-100 transition">查询账户余额</button>
+                    <div id="balanceInfo" class="mt-2 text-xs text-slate-500 hidden"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grid Visualization -->
+        <div class="lg:col-span-2 space-y-6">
+            <div class="glass-card p-6 rounded-2xl">
+                <h3 class="text-lg font-bold text-slate-800 mb-4">网格状态</h3>
+                <div id="gridViz" class="space-y-1 max-h-[500px] overflow-y-auto">
+                    <p class="text-slate-400 text-sm">启动后显示网格状态...</p>
+                </div>
+            </div>
+
+            <!-- Trade History -->
+            <div class="glass-card p-6 rounded-2xl">
+                <h3 class="text-lg font-bold text-slate-800 mb-4">成交记录</h3>
+                <div id="tradeHistory" class="overflow-x-auto">
+                    <p class="text-slate-400 text-sm">暂无成交记录</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Risk Warning -->
+    <div class="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
+        <strong>风险提示：</strong>网格交易在震荡市中表现良好，但在单边行情中可能亏损。请合理设置网格区间，控制投资金额，做好风险管理。本工具仅供学习交流，投资需谨慎。
+    </div>
+</div>
+
+<!-- Auth Modal -->
+<div id="authModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center">
+    <div class="bg-white rounded-2xl shadow-xl p-8 w-[360px] max-w-[90vw]">
+        <h3 class="text-xl font-bold text-slate-800 mb-4">身份验证</h3>
+        <input id="authPwd" type="password" class="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 mb-3" placeholder="输入密码">
+        <p id="authErr" class="text-xs text-red-500 mb-3 hidden">密码错误</p>
+        <div class="flex gap-3">
+            <button onclick="closeAuth()" class="flex-1 border border-slate-200 text-slate-600 py-2 rounded-lg text-sm">取消</button>
+            <button onclick="doAuth()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm">确认</button>
+        </div>
+    </div>
+</div>
+
+<script>
+let authToken = sessionStorage.getItem('authToken') || '';
+let pendingAction = null;
+let ws = null;
+let gridData = null;
+
+// ---- Auth ----
+function requireAuth(cb) {
+    if (authToken) { cb(); return; }
+    pendingAction = cb;
+    document.getElementById('authErr').classList.add('hidden');
+    document.getElementById('authPwd').value = '';
+    const m = document.getElementById('authModal');
+    m.classList.remove('hidden'); m.classList.add('flex');
+    document.getElementById('authPwd').focus();
+}
+function closeAuth() {
+    const m = document.getElementById('authModal');
+    m.classList.add('hidden'); m.classList.remove('flex');
+    pendingAction = null;
+}
+async function doAuth() {
+    const pwd = document.getElementById('authPwd').value;
+    const res = await fetch('/api/auth', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd })
+    });
+    if (res.ok) {
+        const d = await res.json();
+        authToken = d.token;
+        sessionStorage.setItem('authToken', authToken);
+        closeAuth();
+        if (pendingAction) { const a = pendingAction; pendingAction = null; a(); }
+    } else {
+        document.getElementById('authErr').classList.remove('hidden');
+    }
+}
+document.getElementById('authPwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') doAuth(); });
+document.getElementById('authModal').addEventListener('click', (e) => { if (e.target.id === 'authModal') closeAuth(); });
+
+// ---- API Helpers ----
+async function apiFetch(url, opts = {}) {
+    opts.headers = { ...opts.headers, 'Content-Type': 'application/json', 'X-Auth-Token': authToken };
+    const res = await fetch(url, opts);
+    if (res.status === 401) {
+        authToken = ''; sessionStorage.removeItem('authToken');
+        alert('认证已过期，请重新操作'); return null;
+    }
+    return res;
+}
+
+// ---- WebSocket ----
+function connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    ws = new WebSocket(`${proto}://${location.host}`);
+    ws.onmessage = (e) => {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'grid') {
+            gridData = msg.data;
+            renderGrid(msg.data);
+        }
+    };
+    ws.onclose = () => setTimeout(connect, 3000);
+}
+
+// ---- Actions ----
+function saveKeys() {
+    requireAuth(async () => {
+        const apiKey = document.getElementById('apiKey').value.trim();
+        const apiSecret = document.getElementById('apiSecret').value.trim();
+        const res = await apiFetch('/api/grid/keys', {
+            method: 'POST', body: JSON.stringify({ apiKey, apiSecret })
+        });
+        if (res && res.ok) {
+            document.getElementById('keyStatus').textContent = 'API 密钥已保存';
+            document.getElementById('keyStatus').className = 'text-xs text-emerald-500';
+            document.getElementById('apiKey').value = '';
+            document.getElementById('apiSecret').value = '';
+        }
+    });
+}
+
+async function fetchCurrentPrice() {
+    const pair = document.getElementById('pair').value.trim();
+    if (!pair) return;
+    try {
+        const res = await fetch(`/api/grid/price?symbol=${pair}`);
+        const d = await res.json();
+        if (d.price) {
+            document.getElementById('priceHint').textContent = `当前价格: $${d.price.toLocaleString()}`;
+            // Auto-suggest range: ±15%
+            if (!document.getElementById('lowerPrice').value) {
+                document.getElementById('lowerPrice').value = Math.round(d.price * 0.85 * 100) / 100;
+                document.getElementById('upperPrice').value = Math.round(d.price * 1.15 * 100) / 100;
+            }
+        }
+    } catch (e) {
+        document.getElementById('priceHint').textContent = '获取失败: ' + e.message;
+    }
+}
+
+function previewGrid() {
+    const upper = parseFloat(document.getElementById('upperPrice').value);
+    const lower = parseFloat(document.getElementById('lowerPrice').value);
+    const grids = parseInt(document.getElementById('gridCount').value);
+    const amount = parseFloat(document.getElementById('investAmount').value);
+    if (!upper || !lower || !grids || upper <= lower) return;
+    const step = (upper - lower) / grids;
+    const midPrice = (upper + lower) / 2;
+    const profitPerGrid = (amount / grids) * (step / midPrice);
+    const rate = (step / midPrice * 100);
+    document.getElementById('previewStep').textContent = `$${step.toFixed(2)}`;
+    document.getElementById('previewProfit').textContent = `~$${profitPerGrid.toFixed(4)}`;
+    document.getElementById('previewRate').textContent = `~${rate.toFixed(2)}%`;
+    document.getElementById('gridPreview').classList.remove('hidden');
+}
+
+function startBot() {
+    requireAuth(async () => {
+        const config = {
+            pair: document.getElementById('pair').value.trim(),
+            upper: document.getElementById('upperPrice').value,
+            lower: document.getElementById('lowerPrice').value,
+            grids: document.getElementById('gridCount').value,
+            amount: document.getElementById('investAmount').value,
+        };
+        if (!config.pair || !config.upper || !config.lower || !config.grids || !config.amount) {
+            showError('请填写完整参数'); return;
+        }
+        if (!confirm(`确认启动网格机器人？\n交易对: ${config.pair}\n区间: ${config.lower} - ${config.upper}\n网格: ${config.grids}\n金额: ${config.amount} USDT`)) return;
+        showError('');
+        const res = await apiFetch('/api/grid/start', {
+            method: 'POST', body: JSON.stringify(config)
+        });
+        if (res) {
+            const d = await res.json();
+            if (d.error) showError(d.error);
+        }
+    });
+}
+
+function stopBot() {
+    requireAuth(async () => {
+        if (!confirm('确认停止机器人？将撤销所有挂单。')) return;
+        await apiFetch('/api/grid/stop', { method: 'POST' });
+    });
+}
+
+async function fetchBalance() {
+    requireAuth(async () => {
+        const res = await apiFetch('/api/grid/balance');
+        if (!res) return;
+        const d = await res.json();
+        if (d.error) { document.getElementById('balanceInfo').textContent = d.error; }
+        else {
+            const html = d.map(b => `<span class="inline-block mr-3">${b.asset}: <b>${b.free.toFixed(4)}</b>${b.locked > 0 ? ` (锁定: ${b.locked.toFixed(4)})` : ''}</span>`).join('');
+            document.getElementById('balanceInfo').innerHTML = html || '无余额';
+        }
+        document.getElementById('balanceInfo').classList.remove('hidden');
+    });
+}
+
+function showError(msg) {
+    const el = document.getElementById('botError');
+    if (msg) { el.textContent = msg; el.classList.remove('hidden'); }
+    else el.classList.add('hidden');
+}
+
+// ---- Render ----
+function renderGrid(data) {
+    // Status
+    const dot = document.getElementById('statusDot');
+    const label = document.getElementById('statusLabel');
+    dot.className = `status-dot ${data.running ? 'running' : 'stopped'}`;
+    label.textContent = data.running ? '运行中' : '未运行';
+    label.className = `text-sm ${data.running ? 'text-emerald-600 font-medium' : 'text-slate-500'}`;
+
+    // Cards
+    if (data.currentPrice > 0) {
+        document.getElementById('currentPrice').textContent = '$' + data.currentPrice.toLocaleString('en-US');
+    }
+    const profitEl = document.getElementById('totalProfit');
+    profitEl.textContent = `$${data.totalProfit.toFixed(4)}`;
+    profitEl.className = `text-2xl font-bold ${data.totalProfit >= 0 ? 'text-emerald-600' : 'text-red-500'}`;
+    document.getElementById('activeOrders').textContent = data.activeOrders;
+    document.getElementById('tradeCount').textContent = data.tradeCount;
+
+    // Buttons
+    document.getElementById('startBtn').classList.toggle('hidden', data.running);
+    document.getElementById('stopBtn').classList.toggle('hidden', !data.running);
+
+    // Key status
+    if (data.hasKeys) {
+        document.getElementById('keyStatus').textContent = 'API 密钥已配置';
+        document.getElementById('keyStatus').className = 'text-xs text-emerald-500';
+    }
+
+    // Grid visualization
+    if (data.grids && data.grids.length > 0) {
+        const viz = document.getElementById('gridViz');
+        const cp = data.currentPrice;
+        const maxP = Math.max(...data.grids.map(g => g.price));
+        const minP = Math.min(...data.grids.map(g => g.price));
+        const range = maxP - minP || 1;
+
+        let html = '';
+        // Render from top (highest price) to bottom
+        const sorted = [...data.grids].sort((a, b) => b.price - a.price);
+        sorted.forEach(g => {
+            const isCurrentLevel = cp >= g.price && cp < g.price + (range / data.grids.length);
+            let statusCls, statusText, barColor;
+            switch (g.status) {
+                case 'buying': statusCls = 'text-emerald-600'; statusText = '挂买'; barColor = 'bg-emerald-100 border-emerald-300'; break;
+                case 'bought': statusCls = 'text-blue-600'; statusText = '已买入'; barColor = 'bg-blue-100 border-blue-300'; break;
+                case 'selling': statusCls = 'text-red-500'; statusText = '挂卖'; barColor = 'bg-red-100 border-red-300'; break;
+                default: statusCls = 'text-slate-400'; statusText = '空闲'; barColor = 'bg-slate-50 border-slate-200'; break;
+            }
+            const pct = ((g.price - minP) / range * 60 + 20).toFixed(1);
+            const isCp = isCurrentLevel;
+            html += `
+            <div class="flex items-center gap-3 py-1.5 px-3 rounded-lg border ${barColor} grid-level ${isCp ? 'ring-2 ring-indigo-400' : ''}">
+                <span class="text-xs text-slate-500 w-8">#${g.index}</span>
+                <span class="text-sm font-mono font-medium w-28">$${g.price.toLocaleString('en-US')}</span>
+                <div class="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div class="h-full rounded-full ${g.status === 'buying' ? 'bg-emerald-400' : g.status === 'selling' ? 'bg-red-400' : g.status === 'bought' ? 'bg-blue-400' : 'bg-slate-200'}" style="width:${pct}%"></div>
+                </div>
+                <span class="text-xs font-medium w-12 text-right ${statusCls}">${statusText}</span>
+                ${g.qty > 0 ? `<span class="text-xs text-slate-400 w-20 text-right">${g.qty}</span>` : '<span class="w-20"></span>'}
+            </div>`;
+        });
+
+        // Current price marker
+        if (cp > 0) {
+            html = `<div class="flex items-center gap-3 py-2 px-3 rounded-lg bg-indigo-50 border border-indigo-300 mb-2">
+                <span class="text-xs text-indigo-500 w-8">NOW</span>
+                <span class="text-sm font-mono font-bold text-indigo-700 w-28">$${cp.toLocaleString('en-US')}</span>
+                <span class="text-xs text-indigo-500">← 当前价格</span>
+            </div>` + html;
+        }
+        viz.innerHTML = html;
+    }
+
+    // Trade history
+    if (data.trades && data.trades.length > 0) {
+        const tbody = data.trades.slice().reverse().map(t => `
+            <tr class="border-b border-slate-100 text-sm">
+                <td class="py-2 px-3 font-mono">$${t.buyPrice.toLocaleString()}</td>
+                <td class="py-2 px-3 font-mono">$${t.sellPrice.toLocaleString()}</td>
+                <td class="py-2 px-3">${t.qty}</td>
+                <td class="py-2 px-3 font-medium text-emerald-600">+$${t.profit.toFixed(4)}</td>
+                <td class="py-2 px-3 text-slate-400 text-xs">${new Date(t.time).toLocaleString('zh-CN')}</td>
+            </tr>
+        `).join('');
+        document.getElementById('tradeHistory').innerHTML = `
+            <table class="w-full text-left">
+                <thead><tr class="text-xs text-slate-400 border-b border-slate-100">
+                    <th class="py-2 px-3">买入价</th><th class="py-2 px-3">卖出价</th>
+                    <th class="py-2 px-3">数量</th><th class="py-2 px-3">利润</th>
+                    <th class="py-2 px-3">时间</th>
+                </tr></thead>
+                <tbody>${tbody}</tbody>
+            </table>`;
+    }
+}
+
+// ---- Init ----
+async function init() {
+    connect();
+    // Fetch initial status
+    try {
+        const res = await fetch('/api/grid/status');
+        const data = await res.json();
+        gridData = data;
+        renderGrid(data);
+    } catch {}
+    // Auto-fetch price on load
+    fetchCurrentPrice();
+}
+init();
+</script>
+</body>
+</html>
