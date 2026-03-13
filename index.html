@@ -873,7 +873,9 @@ async function submitHolding() {
     if (!data.holding.symbol || !data.holding.name || !data.holding.shares) {
         alert('请填写完整信息'); return;
     }
-    await fetch('/api/holding', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
+    const res = await fetch('/api/holding', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
+    if (res.status === 401) { authToken = ''; sessionStorage.removeItem('authToken'); alert('认证已过期，请重新操作'); closeModals(); return; }
+    if (!res.ok) { alert('添加失败'); return; }
     closeModals();
     ['fSymbol','fName','fShares','fCost'].forEach(id => document.getElementById(id).value = '');
 }
@@ -881,15 +883,18 @@ async function submitHolding() {
 async function submitAccount() {
     const data = { name: document.getElementById('fAccName').value.trim(), currency: document.getElementById('fAccCurrency').value };
     if (!data.name) { alert('请输入账户名称'); return; }
-    await fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
+    const res = await fetch('/api/account', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) });
+    if (res.status === 401) { authToken = ''; sessionStorage.removeItem('authToken'); alert('认证已过期，请重新操作'); closeModals(); return; }
+    if (!res.ok) { alert('添加失败'); return; }
     closeModals();
     document.getElementById('fAccName').value = '';
 }
 
-async function deleteHolding(ai, hi) {
-    requireAuth(() => {
+function deleteHolding(ai, hi) {
+    requireAuth(async () => {
         if (!confirm('确认删除此持仓？')) return;
-        fetch(`/api/holding?account=${ai}&index=${hi}`, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } });
+        const res = await fetch(`/api/holding?account=${ai}&index=${hi}`, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } });
+        if (res.status === 401) { authToken = ''; sessionStorage.removeItem('authToken'); alert('认证已过期，请重新操作'); }
     });
 }
 
@@ -918,11 +923,13 @@ async function submitEdit() {
     if (isNaN(shares) || isNaN(costPrice) || shares <= 0 || costPrice <= 0) {
         alert('请输入有效的数量和成本价'); return;
     }
-    await fetch('/api/holding', {
+    const res = await fetch('/api/holding', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
         body: JSON.stringify({ accountIndex: ai, holdingIndex: hi, shares, costPrice })
     });
+    if (res.status === 401) { authToken = ''; sessionStorage.removeItem('authToken'); alert('认证已过期，请重新操作'); closeModals(); return; }
+    if (!res.ok) { alert('保存失败'); return; }
     closeModals();
 }
 
@@ -947,11 +954,13 @@ async function submitCashEdit() {
     if (isNaN(cash) || cash < 0) {
         alert('请输入有效的现金金额'); return;
     }
-    await fetch('/api/cash', {
+    const res = await fetch('/api/cash', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
         body: JSON.stringify({ account: ai, cash })
     });
+    if (res.status === 401) { authToken = ''; sessionStorage.removeItem('authToken'); alert('认证已过期，请重新操作'); closeModals(); return; }
+    if (!res.ok) { alert('保存失败'); return; }
     closeModals();
 }
 
